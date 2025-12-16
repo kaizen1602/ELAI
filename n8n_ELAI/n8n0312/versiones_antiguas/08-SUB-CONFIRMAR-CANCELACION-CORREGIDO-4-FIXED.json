@@ -1,0 +1,255 @@
+{
+  "name": "08-SUB-CONFIRMAR-CANCELACION-CORREGIDO",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "cita_id",
+              "type": "number"
+            },
+            {
+              "name": "paciente_id",
+              "type": "number"
+            },
+            {
+              "name": "token"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -992,
+        128
+      ],
+      "id": "02929137-5631-47fa-8e32-a0f97af7177c",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar inputs\nconst citaId = Number($json.cita_id);\nconst pacienteId = Number($json.paciente_id);\nconst token = $json.token;\n\nconsole.log('=== VALIDAR INPUTS ===');\nconsole.log('cita_id:', citaId);\nconsole.log('paciente_id:', pacienteId);\nconsole.log('token presente:', !!token);\n\nif (!citaId || isNaN(citaId) || citaId <= 0) {\n    return {\n        json: {\n            success: false,\n            mensaje: \"ID de cita inválido\",\n            valid: false\n        }\n    };\n}\n\nif (!pacienteId || isNaN(pacienteId) || pacienteId <= 0) {\n    return {\n        json: {\n            success: false,\n            mensaje: \"ID de paciente inválido\",\n            valid: false\n        }\n    };\n}\n\nif (!token) {\n    return {\n        json: {\n            success: false,\n            mensaje: \"Token JWT requerido\",\n            valid: false\n        }\n    };\n}\n\nreturn {\n    json: {\n        cita_id: citaId,\n        paciente_id: pacienteId,\n        token: token,\n        valid: true\n    }\n};"
+      },
+      "name": "Validar Inputs",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        128
+      ],
+      "id": "57218df3-a82c-494e-837e-be77c29d7526"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-valid",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        128
+      ],
+      "id": "ade4e4df-5af1-4cfd-9f59-97fd5c5c0cde",
+      "name": "¿Inputs Válidos?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=={{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/citas/{{ $json.cita_id }}/cancelar/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "motivo",
+              "value": "Cancelación solicitada por WhatsApp"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Cancelar Cita",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -240,
+        48
+      ],
+      "id": "261123bb-4f35-4f88-ab08-332cce93f659",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Retornar respuesta de la API\nconst response = $json;\n\nif (response.error) {\n    return {\n        json: {\n            success: false,\n            mensaje: 'Error al cancelar la cita',\n            error: response.error\n        }\n    };\n}\n\nreturn {\n    json: {\n        success: true,\n        cita_id: response.cita_id,\n        mensaje: response.mensaje,\n        detalles: response.detalles\n    }\n};"
+      },
+      "name": "Formatear Respuesta",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "6997abf7-45a0-4a3d-a7f8-5cc3e5a1af99"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "msg",
+              "name": "mensaje",
+              "value": "={{ $json.mensaje }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -208,
+        256
+      ],
+      "id": "119e25f2-3d9e-4a22-8b21-c673d81bb334",
+      "name": "Error Input Inválido"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n  const CONFIG = {\n    BACKEND_NGROK_URL: \" https://e5d3dba10ea2.ngrok-free.app\",\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  return {\n    json: {\n      ...CONFIG,\n      ...$json\n    }\n  };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        128
+      ],
+      "id": "a04cb3ad-b094-4c19-8346-5c25a1c78a25",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Inputs": {
+      "main": [
+        [
+          {
+            "node": "¿Inputs Válidos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Inputs Válidos?": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Cancelar Cita",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Input Inválido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Cancelar Cita": {
+      "main": [
+        [
+          {
+            "node": "Formatear Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Validar Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "d4abafc4-ffa4-4995-a1ab-b871540ae51d",
+  "meta": {
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "1uLaAKq343GEMnBs",
+  "tags": []
+}

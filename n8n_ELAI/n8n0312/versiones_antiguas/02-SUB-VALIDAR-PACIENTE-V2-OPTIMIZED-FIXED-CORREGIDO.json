@@ -1,0 +1,679 @@
+{
+  "name": "02-SUB-VALIDAR-PACIENTE-V2-OPTIMIZED",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query"
+            },
+            {
+              "name": "session_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1248,
+        176
+      ],
+      "id": "3f016cc0-1691-4e29-862a-8a98ab692db9",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ 'typing:' + $json.session_id }}",
+        "value": "true"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1072,
+        176
+      ],
+      "id": "62f6be07-8932-4996-9799-dd1f3213dd9e",
+      "name": "Redis Start Typing",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      },
+      "notes": "Inicia el indicador de escritura"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== EXTRAER Y VALIDAR DOCUMENTO =====\n\nconst query = ($json.query || '').toString().trim();\nconst session_id = $json.session_id;\n\nconsole.log('=== VALIDAR PACIENTE - INICIO ===');\nconsole.log('Query recibido:', query);\nconsole.log('Session ID:', session_id);\n\n// Validar que query tenga contenido\nif (!query || query.length === 0) {\n  console.error('❌ Query vacío');\n  return {\n    json: {\n      success: false,\n      error: 'QUERY_VACIO',\n      mensaje: 'No encontré un número de documento. Por favor, envíame tu cédula (solo números). 😊',\n      session_id,\n      documento: '',\n      documento_valido: false\n    }\n  };\n}\n\n// Extraer SOLO dígitos\nconst soloDigitos = query.replace(/[^0-9]/g, '');\nconst esValido = soloDigitos.length >= 8 && soloDigitos.length <= 15;\n\nconsole.log('Dígitos extraídos:', soloDigitos);\nconsole.log('Longitud:', soloDigitos.length);\nconsole.log('¿Es válido?:', esValido);\n\nif (!esValido) {\n  return {\n    json: {\n      success: false,\n      error: 'DOCUMENTO_INVALIDO',\n      mensaje: `Hmm, ese número no parece correcto 🤔\\n\\nPor favor, envíame tu cédula completa (entre 8 y 15 dígitos).`,\n      session_id,\n      documento: soloDigitos,\n      documento_valido: false\n    }\n  };\n}\n\nreturn {\n  json: {\n    success: true,\n    session_id,\n    documento: soloDigitos,\n    documento_valido: true\n  }\n};"
+      },
+      "name": "Extraer y Validar Documento",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -912,
+        176
+      ],
+      "id": "3d8ba907-c6cd-4e77-aa4f-faa982805567"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "doc-valido",
+              "leftValue": "={{ $json.documento_valido }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        176
+      ],
+      "id": "bc9ba124-f9d3-48b9-a1a3-bb3102d1961f",
+      "name": "¿Documento Válido?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/pacientes/validar/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('CONFIG').first().json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"documento\": $('Extraer y Validar Documento').item.json.documento } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "Buscar Paciente en Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -432,
+        64
+      ],
+      "id": "ffd4d4a7-9230-4e5a-b39e-43892b147686",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "paciente-existe",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        64
+      ],
+      "id": "fdc96807-8954-4e1e-8d56-3b4cdc4d593f",
+      "name": "¿Paciente Encontrado?"
+    },
+    {
+      "parameters": {
+        "url": "{{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/conversaciones/activa-publica/{{ $('Extraer y Validar Documento').item.json.session_id }}/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('CONFIG').first().json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        48,
+        -32
+      ],
+      "id": "50193f7b-9d06-4643-903f-343891b641aa",
+      "name": "Consultar Conversación Activa",
+      "alwaysOutputData": true,
+      "continueOnFail": true,
+      "notes": "Verifica si ya existe conversación"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "tiene-id",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "any",
+                "operation": "exists"
+              }
+            },
+            {
+              "id": "no-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "any",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        288,
+        -32
+      ],
+      "id": "b7fb0f23-59fa-4b83-a87d-b49e4ccad36c",
+      "name": "¿Conversación Existe?"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== CONVERSACIÓN YA EXISTE - RETORNAR DATOS =====\n\nconst paciente = $('Buscar Paciente en Backend').first().json;\nconst conversacion = $('Consultar Conversación Activa').first().json;\n\nconsole.log('✅ CONVERSACIÓN EXISTENTE');\nconsole.log('Paciente:', paciente.nombre);\nconsole.log('Conversación ID:', conversacion.id);\n\nconst pacienteId = Number(paciente.paciente_id);\nconst entidadMedicaId = Number(paciente.entidad_medica_id);\nconst conversacionId = Number(conversacion.id);\n\nif (isNaN(pacienteId) || isNaN(entidadMedicaId) || isNaN(conversacionId)) {\n    console.error('❌ Error convirtiendo IDs');\n    return {\n        json: {\n            success: false,\n            error: 'CONVERSION_ERROR',\n            mensaje: 'Ups, algo salió mal con tus datos. ¿Intentamos de nuevo? 😊'\n        }\n    };\n}\n\nreturn {\n    json: {\n        success: true,\n        paciente_id: pacienteId,\n        nombre: paciente.nombre || 'Usuario',\n        documento: paciente.documento,\n        entidad_medica_id: entidadMedicaId,\n        token: paciente.token,\n        conversacion_id: conversacionId,\n        mensaje: `¡Hola de nuevo, ${paciente.nombre}! 😊\\n¿En qué puedo ayudarte hoy?`\n    }\n};"
+      },
+      "name": "Respuesta - Conversación Existe",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        528,
+        -144
+      ],
+      "id": "ccd42e2b-1acc-4cde-9713-cba2215f63eb"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/conversaciones/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Buscar Paciente en Backend').item.json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"session_id\": $('Extraer y Validar Documento').item.json.session_id,\n  \"paciente\": $('Buscar Paciente en Backend').item.json.paciente_id,\n  \"entidad_medica\": $('Buscar Paciente en Backend').item.json.entidad_medica_id,\n  \"estado\": \"ACTIVO\"\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        528,
+        64
+      ],
+      "id": "6a871667-2279-46f2-9e5b-5978fc0280f3",
+      "name": "Crear Nueva Conversación",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== NUEVA CONVERSACIÓN CREADA =====\n\nconst paciente = $('Buscar Paciente en Backend').first().json;\nconst conversacionResponse = $json;\n\nconsole.log('✅ NUEVA CONVERSACIÓN');\n\n// Validar respuesta\nif (conversacionResponse.error) {\n    console.error('❌ Error:', conversacionResponse.error);\n    \n    // Si el error es que ya existe, no es crítico\n    if (conversacionResponse.error.message && conversacionResponse.error.message.includes('already exists')) {\n        console.log('⚠️ Conversación ya existía (race condition)');\n    }\n    \n    return {\n        json: {\n            success: false,\n            error: 'ERROR_CREAR_CONVERSACION',\n            mensaje: 'Ups, tuve un problemita creando tu sesión. ¿Intentamos de nuevo? 😊'\n        }\n    };\n}\n\nconst pacienteId = Number(paciente.paciente_id);\nconst entidadMedicaId = Number(paciente.entidad_medica_id);\nconst conversacionId = conversacionResponse.id ? Number(conversacionResponse.id) : null;\n\nif (isNaN(pacienteId) || isNaN(entidadMedicaId)) {\n    console.error('❌ Error convirtiendo IDs');\n    return {\n        json: {\n            success: false,\n            error: 'CONVERSION_ERROR',\n            mensaje: 'Ups, algo salió mal. ¿Intentamos de nuevo? 😊'\n        }\n    };\n}\n\nconsole.log('Paciente:', paciente.nombre);\nconsole.log('Conversación creada ID:', conversacionId);\n\nreturn {\n    json: {\n        success: true,\n        paciente_id: pacienteId,\n        nombre: paciente.nombre || 'Usuario',\n        documento: paciente.documento,\n        entidad_medica_id: entidadMedicaId,\n        token: paciente.token,\n        conversacion_id: conversacionId,\n        mensaje: `¡Bienvenido/a, ${paciente.nombre}! 😊\\n\\nEstoy lista para ayudarte. ¿Qué necesitas hoy?`\n    }\n};"
+      },
+      "name": "Respuesta - Conversación Creada",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        768,
+        64
+      ],
+      "id": "022c264a-d412-4c61-bcb6-5f7351b82c27"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "name": "error",
+              "value": "DOCUMENTO_NO_ENCONTRADO",
+              "type": "string"
+            },
+            {
+              "name": "mensaje",
+              "value": "No encontré un registro con ese documento en nuestro sistema 🤔\\n\\n¿Podrías verificar que sea correcto?\\n\\nSi eres nuevo, comunícate con nosotros:\\n📞 {{ $vars.TELEFONO_CLINICA || '(601) 123-4567' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        48,
+        176
+      ],
+      "id": "d7d073c0-58a2-4d17-943d-6b3a68dc8e53",
+      "name": "Paciente No Encontrado"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "success",
+              "value": "={{ $json.success }}",
+              "type": "boolean"
+            },
+            {
+              "name": "error",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            },
+            {
+              "name": "mensaje",
+              "value": "={{ $json.mensaje }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -432,
+        272
+      ],
+      "id": "c9c48e1b-1de4-4297-81cf-2f64ada2bc5c",
+      "name": "Error Validación Documento"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ 'typing:' + $('When Executed by Another Workflow').first().json.session_id }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        768,
+        -144
+      ],
+      "id": "cfa5eaa1-5bae-4205-9ffa-cc0cbd883984",
+      "name": "Redis Stop Typing (Existe)",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      },
+      "notes": "Detiene typing cuando conversación ya existe"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ 'typing:' + $('When Executed by Another Workflow').first().json.session_id }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1008,
+        64
+      ],
+      "id": "9f998f9f-c304-42be-9e2c-e080c194e2d8",
+      "name": "Redis Stop Typing (Creada)",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      },
+      "notes": "Detiene typing cuando se crea nueva conversación"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ 'typing:' + $('When Executed by Another Workflow').first().json.session_id }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        288,
+        176
+      ],
+      "id": "7eab4dcb-2893-4ba9-ac69-d1f675499ed1",
+      "name": "Redis Stop Typing (Not Found)",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      },
+      "notes": "Detiene typing cuando paciente no encontrado"
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ 'typing:' + $('When Executed by Another Workflow').first().json.session_id }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        272
+      ],
+      "id": "8401121e-1a9a-49b8-8396-a988cef40ebd",
+      "name": "Redis Stop Typing (Validation Error)",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      },
+      "notes": "Detiene typing cuando hay error de validación"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n  // ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n  const CONFIG = {\n    // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n    BACKEND_NGROK_URL: \"https://e5d3dba10ea2.ngrok-free.app\",\n\n    // Ngrok headers (no cambiar)\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n\n    // Contacto de la clínica\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  // Pasar CONFIG + datos del trigger anterior\n  return {\n    json: {\n      ...CONFIG,\n      ...$json  // Preserva datos anteriores\n    }\n  };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CONFIG",
+      "id": "1aeec57e-cb2f-4387-a32e-ca2a437fded8",
+      "position": [
+        -1048,
+        176
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Start Typing": {
+      "main": [
+        [
+          {
+            "node": "Extraer y Validar Documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer y Validar Documento": {
+      "main": [
+        [
+          {
+            "node": "¿Documento Válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Documento Válido?": {
+      "main": [
+        [
+          {
+            "node": "Buscar Paciente en Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Validación Documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Paciente en Backend": {
+      "main": [
+        [
+          {
+            "node": "¿Paciente Encontrado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Paciente Encontrado?": {
+      "main": [
+        [
+          {
+            "node": "Consultar Conversación Activa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Paciente No Encontrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Conversación Activa": {
+      "main": [
+        [
+          {
+            "node": "¿Conversación Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Conversación Existe?": {
+      "main": [
+        [
+          {
+            "node": "Respuesta - Conversación Existe",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Crear Nueva Conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta - Conversación Existe": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Existe)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Nueva Conversación": {
+      "main": [
+        [
+          {
+            "node": "Respuesta - Conversación Creada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respuesta - Conversación Creada": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Creada)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Paciente No Encontrado": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Not Found)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Validación Documento": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Validation Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Redis Start Typing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ba063034-183a-487f-b254-f45b4aa1984d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "1B0BC7UVqfah4n2a",
+  "tags": []
+}

@@ -1,0 +1,224 @@
+{
+  "name": "03-SUB-CREAR-CONVERSACION",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "paciente_id",
+              "type": "string"
+            },
+            {
+              "name": "entidad_medica_id",
+              "type": "string"
+            },
+            {
+              "name": "token"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -16,
+        112
+      ],
+      "id": "eda61d6f-4fc3-4bda-9d07-f0096e57c233",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "try {\n    // Obtener datos del trigger\n    let inputData = $input.all()[0]?.json || $json || {};\n    \n    console.log('=== DATOS RECIBIDOS ===');\n    console.log(JSON.stringify(inputData, null, 2));\n    \n    let sessionId = inputData.session_id;\n    let pacienteId = inputData.paciente_id; // String (CUID)\n    let entidadMedicaId = inputData.entidad_medica_id; // String (CUID)\n    let token = inputData.token;\n    \n    // Validaci\u00f3n m\u00ednima\n    if (!sessionId || !pacienteId || !entidadMedicaId || !token) {\n        throw new Error('Faltan datos requeridos');\n    }\n    \n    // Contexto inicial\n    const contextoInicial = {\n        estado_flujo: \"ESPERANDO_SINTOMAS\",\n        fecha_inicio: new Date().toISOString(),\n        ultimo_mensaje: new Date().toISOString()\n    };\n    \n    return {\n        json: {\n            session_id: sessionId,\n            paciente_id: pacienteId,\n            entidad_medica_id: entidadMedicaId,\n            estado: \"ACTIVO\",\n            contexto: JSON.stringify(contextoInicial),\n            token: token\n        }\n    };\n} catch (error) {\n    console.error('ERROR:', error.message);\n    throw error;\n}"
+      },
+      "name": "Preparar Datos",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        160,
+        112
+      ],
+      "id": "28a27fe6-aa15-4ea5-b1ec-c354c59be07d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/conversaciones/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_id",
+              "value": "={{ $json.session_id }}"
+            },
+            {
+              "name": "paciente",
+              "value": "={{ $json.paciente_id }}"
+            },
+            {
+              "name": "entidad_medica",
+              "value": "={{ $json.entidad_medica_id }}"
+            },
+            {
+              "name": "estado",
+              "value": "ACTIVO"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Crear Conversaci\u00f3n",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        384,
+        112
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true,
+      "id": "28810662-b5b6-465f-b804-f2c1098e88dc"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "success-flag",
+              "name": "success",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "conversation-id",
+              "name": "conversacion_id",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "session-id",
+              "name": "session_id",
+              "value": "={{ $('Preparar Datos').item.json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "estado",
+              "name": "estado",
+              "value": "ACTIVO",
+              "type": "string"
+            },
+            {
+              "id": "token",
+              "name": "token",
+              "value": "={{ $('Preparar Datos').item.json.token }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        608,
+        112
+      ],
+      "id": "e406b7fc-8a18-402c-a045-3e7eb3197052",
+      "name": "Formatear Respuesta"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n// ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la clínica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        184,
+        112
+      ],
+      "id": "config-bvfadm2kk",
+      "name": "CONFIG"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Datos": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Crear Conversaci\u00f3n",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Crear Conversaci\u00f3n": {
+      "main": [
+        [
+          {
+            "node": "Formatear Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Preparar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2bb77e72-be08-4f68-b9fd-fefce77c85b7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d8723319617ef3d4f273dd37acd8aa30655f3b7e53f743311144f516c658cc5e"
+  },
+  "id": "nK4euRbU5KxONEjw",
+  "tags": []
+}

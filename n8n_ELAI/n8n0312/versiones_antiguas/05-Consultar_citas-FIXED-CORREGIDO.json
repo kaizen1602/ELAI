@@ -1,0 +1,392 @@
+{
+  "name": "05-Consultar_citas",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "categoria"
+            },
+            {
+              "name": "entidad_medica_id",
+              "type": "number"
+            },
+            {
+              "name": "token"
+            },
+            {
+              "name": "page",
+              "type": "number"
+            },
+            {
+              "name": "session_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1104,
+        128
+      ],
+      "id": "873de14e-2ab1-4e01-b1a5-e4ce988efd03",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -864,
+        128
+      ],
+      "id": "71732e8d-ab3e-4ecb-b38e-c0d7fc4bb106",
+      "name": "Redis Start Typing",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar inputs\nconst categoria = ($json.categoria || '').toLowerCase().trim();\nconst entidadMedicaId = Number($json.entidad_medica_id);\nconst token = $json.token;\nconst page = Number($json.page || 1);\nconst session_id = $json.session_id || 'unknown';\n\nif (!categoria) { throw new Error('No se proporcionó categoría'); }\nif (!entidadMedicaId || isNaN(entidadMedicaId)) { throw new Error('No se proporcionó entidad_medica_id válido'); }\nif (!token) { throw new Error('Token JWT es requerido'); }\nif (!Number.isFinite(page) || page < 1) { throw new Error('page inválido'); }\n\nreturn { json: { categoria, entidad_medica_id: entidadMedicaId, token, page, session_id } };"
+      },
+      "name": "Validar y Preparar",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        128
+      ],
+      "id": "6d023ec3-7758-426d-ab69-aeba59ae9ce0"
+    },
+    {
+      "parameters": {
+        "url": "{{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/citas/disponibles/?categoria={{ $json.categoria }}&entidad_medica_id={{ $json.entidad_medica_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Consultar Citas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -432,
+        128
+      ],
+      "alwaysOutputData": true,
+      "id": "cf0ece59-1437-440f-ae29-901d1dd68637",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-results",
+              "leftValue": "={{ ($json.citas && $json.citas.length > 0) || ($json.results && $json.results.length > 0) || (Array.isArray($json) && $json.length > 0) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        128
+      ],
+      "id": "040ca31c-3691-4092-b481-9a55b56a7d9c",
+      "name": "¿Hay Citas Disponibles?"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== FORMATEAR, FILTRAR Y PAGINAR CITAS (SOLO DISPONIBLES/FUTURAS) =====\n\nconst response = $json;\nconst page = Number($('Validar y Preparar').first().json.page || 1);\nconst pageSize = 10;\n\n// Detectar arreglo de citas\nlet citasArray = [];\nif (response.citas && Array.isArray(response.citas)) citasArray = response.citas;\nelse if (response.results && Array.isArray(response.results)) citasArray = response.results;\nelse if (Array.isArray(response)) citasArray = response;\nelse if (response.data && Array.isArray(response.data)) citasArray = response.data;\n\n// Mapear normalizadas y filtrar disponibles\nconst normalizadas = citasArray\n  .map((cita) => ({\n    slot_id: cita.id ?? cita.slot_id ?? cita.pk ?? null,\n    agenda_id: cita.agenda_id ?? cita.agenda ?? null,\n    medico_id: cita.medico_id ?? cita.doctor_id ?? null,\n    fecha: cita.fecha ?? cita.fecha_formateada ?? '',\n    hora: cita.hora ?? cita.hora_cita ?? '',\n    medico: cita.medico_nombre ?? cita.doctor_nombre ?? cita.doctor ?? cita.medico ?? '',\n    especialidad: cita.especialidad_nombre ?? cita.specialty ?? cita.especialidad ?? '',\n    consultorio: cita.consultorio ?? '',\n    disponible: cita.disponible !== false\n  }))\n  .filter((c) => c.disponible === true && c.slot_id);\n\n// Excluir pasadas (fecha/hora ISO)\nconst now = new Date();\nconst yyyy = now.getFullYear();\nconst mm = String(now.getMonth()+1).padStart(2,'0');\nconst dd = String(now.getDate()).padStart(2,'0');\nconst HH = String(now.getHours()).padStart(2,'0');\nconst MM = String(now.getMinutes()).padStart(2,'0');\nconst SS = String(now.getSeconds()).padStart(2,'0');\nconst today = `${yyyy}-${mm}-${dd}`;\nconst currentTime = `${HH}:${MM}:${SS}`;\n\nconst futuras = normalizadas.filter((c) => {\n  if (!c.fecha) return false;\n  if (c.fecha > today) return true;\n  if (c.fecha < today) return false;\n  if (!c.hora) return false;\n  return c.hora >= currentTime;\n});\n\n// Orden estable por fecha+hora\nfuturas.sort((a,b) => (a.fecha + ' ' + a.hora).localeCompare(b.fecha + ' ' + b.hora));\n\nconst total = futuras.length;\nif (total === 0) {\n  return { json: { success: false, mensaje: 'No hay citas disponibles', citas: [], total_citas: 0, page, has_more: false } };\n}\n\n// Paginación 10 en 10\nconst start = (page - 1) * pageSize;\nconst end = start + pageSize;\nconst pagina = futuras.slice(start, end);\n\n// Construir mapeo posición → slot_id (1..10) para el Agente\nconst lista_candidatos = pagina.map((c) => ({ slot_id: c.slot_id, agenda_id: c.agenda_id, fecha: c.fecha, hora: c.hora, medico: c.medico, especialidad: c.especialidad }));\nconst mapa_posiciones = {};\nfor (let i=0;i<lista_candidatos.length;i++){ mapa_posiciones[String(i+1)] = lista_candidatos[i]; }\n\nreturn { json: { success: true, citas: lista_candidatos, total_citas: total, page, has_more: end < total, lista_candidatos, mapa_posiciones } };"
+      },
+      "name": "Formatear Citas",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0eca2e6b-baea-44fa-9952-216c737aaf5e"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== GUARDAR MAPEO DE SLOTS EN REDIS =====\n// CRÍTICO: Este mapeo permite que el flujo 06 sepa qué slot_id corresponde a cada posición\n\nconst items = $input.all();\nconst citas = items[0].json.citas || [];\nconst session_id = $('Validar y Preparar').first().json.session_id;\n\nif (!session_id || session_id === 'unknown') {\n  console.log('⚠️ No se puede guardar mapeo: session_id no disponible');\n  return items;\n}\n\nif (citas.length === 0) {\n  console.log('⚠️ No hay citas para mapear');\n  return items;\n}\n\n// Crear mapeo: posición → slot_id\nconst mapa = {};\ncitas.slice(0, 10).forEach((cita, index) => {\n  const posicion = String(index + 1);\n  mapa[posicion] = {\n    slot_id: cita.slot_id,\n    agenda_id: cita.agenda_id,\n    fecha: cita.fecha,\n    hora: cita.hora,\n    medico: cita.medico,\n    especialidad: cita.especialidad\n  };\n});\n\n// Conectar a Redis\nconst Redis = require('ioredis');\nconst redis = new Redis({\n  host: 'redis',\n  port: 6379,\n  db: 0\n});\n\n// Guardar en Redis (TTL: 10 minutos = 600 segundos)\nconst mapKey = `sophia:slot_map:${session_id}`;\n\ntry {\n  await redis.setex(mapKey, 600, JSON.stringify(mapa));\n  console.log('✅ Mapeo guardado en Redis:', mapKey);\n  console.log('📊 Total slots mapeados:', Object.keys(mapa).length);\n  console.log('🔑 Ejemplo mapeo:', JSON.stringify(mapa['1'], null, 2));\n} catch (error) {\n  console.error('❌ Error guardando mapeo en Redis:', error.message);\n} finally {\n  await redis.quit();\n}\n\n// Retornar datos originales + confirmación\nreturn items.map(item => ({\n  json: {\n    ...item.json,\n    mapeo_guardado: true,\n    mapeo_key: mapKey,\n    total_mapeados: Object.keys(mapa).length\n  }\n}));"
+      },
+      "name": "Save Slot Mapping to Redis",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "a845d6a9-54e3-44f5-865e-ed679ded0d20",
+      "notes": "CRÍTICO: Guarda mapeo posición → slot_id para flujo 06"
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        448,
+        0
+      ],
+      "id": "4abbb1a5-e188-48aa-8a2c-89fd1cb96ba5",
+      "name": "Redis Stop Typing (Success)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "arr",
+              "name": "citas",
+              "value": "=[]",
+              "type": "array"
+            },
+            {
+              "id": "tot",
+              "name": "total_citas",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "msg",
+              "name": "mensaje",
+              "value": "No hay citas disponibles en este momento",
+              "type": "string"
+            },
+            {
+              "id": "page",
+              "name": "page",
+              "value": "={{ $('Validar y Preparar').first().json.page || 1 }}",
+              "type": "string"
+            },
+            {
+              "id": "more",
+              "name": "has_more",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        16,
+        224
+      ],
+      "id": "6a053908-953f-47dc-abd6-ec8e77cd5fc7",
+      "name": "Sin Citas Disponibles"
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        240,
+        224
+      ],
+      "id": "9a2c8c2b-491c-4377-83c8-46b993ba1be6",
+      "name": "Redis Stop Typing (Empty)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n  // ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n  const CONFIG = {\n    // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n    BACKEND_NGROK_URL: \"https://e5d3dba10ea2.ngrok-free.app\",\n\n    // Ngrok headers (no cambiar)\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n\n    // Contacto de la clínica\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  // Pasar CONFIG + datos del trigger anterior\n  return {\n    json: {\n      ...CONFIG,\n      ...$json  // Preserva datos anteriores\n    }\n  };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CONFIG",
+      "id": "496913b0-aa9f-495a-b315-6d584917293f",
+      "position": [
+        -904,
+        128
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Start Typing": {
+      "main": [
+        [
+          {
+            "node": "Validar y Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y Preparar": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Consultar Citas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Consultar Citas": {
+      "main": [
+        [
+          {
+            "node": "¿Hay Citas Disponibles?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay Citas Disponibles?": {
+      "main": [
+        [
+          {
+            "node": "Formatear Citas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin Citas Disponibles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Citas": {
+      "main": [
+        [
+          {
+            "node": "Save Slot Mapping to Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Slot Mapping to Redis": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin Citas Disponibles": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Empty)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Redis Start Typing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6c56ca27-c247-4615-b680-88a86428d2aa",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "k4DuedyklL6gl6vk",
+  "tags": []
+}

@@ -1,0 +1,32 @@
+{
+  "name": "elai-typing-subscriber",
+  "version": "1.0.0",
+  "description": "ELAI Typing Subscriber - Redis pub/sub for WhatsApp typing indicators",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "elai",
+    "typing",
+    "redis",
+    "whatsapp"
+  ],
+  "author": "ELAI Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "ioredis": "^5.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,116 @@
+========================================
+RESUMEN FINAL DE CORRECCIONES
+========================================
+Fecha: 2025-12-04
+Estado: TODAS LAS CORRECCIONES APLICADAS
+
+========================================
+PROBLEMA PRINCIPAL IDENTIFICADO
+========================================
+
+El Agent (OpenAI) enviaba los parámetros como JSON string en 'query':
+
+  Recibido: [{"query": "{\"agenda_id\":2951,\"motivo_consulta\":\"...\"}" }]
+  Esperado: {"agenda_id": 2951, "motivo_consulta": "...", ...}
+
+========================================
+CORRECCIONES APLICADAS
+========================================
+
+FLUJO 06: 06-SUB-AGENDAR-CITA-OPTIMIZED-FINAL16.json
+
+1. Añadido nodo "Parse Query JSON" al inicio
+   - Parsea el JSON string del campo 'query'
+   - Extrae parámetros individuales
+   - Maneja 3 casos diferentes de formato
+
+2. URL del nodo "Lock Slot"
+   ANTES: + $json.slot_id +
+   DESPUÉS: + $('CONFIG').item.json.slot_id +
+
+3. Authorization header
+   ANTES: 'Bearer ' + $json.token
+   DESPUÉS: 'Bearer ' + $('CONFIG').item.json.token
+
+4. session_id en body
+   ANTES: $json.session_id
+   DESPUÉS: $('CONFIG').item.json.session_id
+
+Flujo: Trigger → Parse Query JSON → CONFIG → Redis → Lock Slot → ...
+
+----------------------------------------
+
+FLUJO 01: 01-WORKFLOW-PRINCIPAL-ESCALABLE-V3-DECISION-U.V.json
+
+1. Mapeo de parámetros en tool_agendar_cita
+   ANTES: "slot_id": "={{ $json.agenda_id }}"
+   DESPUÉS: "agenda_id": "={{ $json.agenda_id }}"
+
+========================================
+PASOS PARA APLICAR
+========================================
+
+1. REIMPORTAR WORKFLOWS EN N8N
+   - Eliminar workflows viejos
+   - Importar archivos JSON actualizados
+   - Verificar nodo "Parse Query JSON" existe en flujo 06
+   - Activar ambos workflows
+
+2. LIMPIAR DATOS
+   docker-compose exec backend python manage.py shell << 'EOF'
+   from accounts.models import ConversacionWhatsApp
+   ConversacionWhatsApp.objects.all().delete()
+   EOF
+
+3. PROBAR FLUJO COMPLETO
+   a) hola → Pide cédula
+   b) 1108252740 → Saluda con nombre
+   c) tengo dolor de cabeza → Muestra 10 citas
+   d) quiero la 1 → Confirma cita ← CRÍTICO
+
+========================================
+VERIFICACIÓN
+========================================
+
+Si persiste error, verificar en n8n:
+
+Flujo 06 → Última ejecución → Nodo "Parse Query JSON"
+  INPUT: {"query": "{\"agenda_id\":2951,...}"}
+  OUTPUT: {"agenda_id": 2951, ...}  ← Debe estar parseado
+
+Flujo 06 → Nodo "CONFIG"
+  OUTPUT: {"slot_id": 2951, "token": "eyJ...", ...}  ← Debe tener valores
+
+Flujo 06 → Nodo "Lock Slot"
+  URL: https://.../api/v1/slots/2951/lock/  ← Debe tener número, NO undefined
+
+========================================
+ARCHIVOS MODIFICADOS
+========================================
+
+config/n8n0312/
+  01-WORKFLOW-PRINCIPAL-ESCALABLE-V3-DECISION-U.V.json ← MODIFICADO
+  06-SUB-AGENDAR-CITA-OPTIMIZED-FINAL16.json ← MODIFICADO
+  RESUMEN_FINAL.txt ← NUEVO
+
+========================================
+RESULTADO ESPERADO
+========================================
+
+Usuario: hola
+Bot: Necesito tu número de cédula
+
+Usuario: 1108252740
+Bot: ¡Hola K! ¿En qué puedo ayudarte?
+
+Usuario: tengo dolor de cabeza
+Bot: [Muestra 10 citas]
+
+Usuario: quiero la 1
+Bot: ¡Perfecto! Tu cita está confirmada:
+     Viernes 5 de diciembre a las 08:00 AM
+     Dr. Carlos García López
+
+SIN ERRORES - FLUJO COMPLETO FUNCIONANDO
+
+========================================

@@ -1,0 +1,195 @@
+{
+  "name": "09-SUB-ACTUALIZAR-CONTEXTO-CONVERSACION",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "conversacion_id",
+              "type": "string",
+              "required": true,
+              "description": "ID de la conversaci\u00f3n a actualizar"
+            },
+            {
+              "name": "estado_flujo",
+              "type": "string",
+              "required": false,
+              "description": "Estado actual del flujo (ej: SINTOMAS_CLASIFICADOS, CITA_AGENDADA)"
+            },
+            {
+              "name": "sintomas_reportados",
+              "type": "string",
+              "required": false,
+              "description": "S\u00edntomas reportados por el paciente"
+            },
+            {
+              "name": "categoria_identificada",
+              "type": "string",
+              "required": false,
+              "description": "Categor\u00eda m\u00e9dica identificada"
+            },
+            {
+              "name": "cita_id",
+              "type": "string",
+              "required": false,
+              "description": "ID de la cita si fue agendada"
+            },
+            {
+              "name": "token",
+              "type": "string",
+              "required": true,
+              "description": "Token JWT para autenticaci\u00f3n"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -640,
+        240
+      ],
+      "id": "trigger-actualizar-contexto",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Preparar contexto actualizado\nconst conversacionId = $json.conversacion_id; // CUID\nconst token = $json.token;\n\nif (!conversacionId) {\n    throw new Error('conversacion_id inv\u00e1lido');\n}\n\nreturn {\n    json: {\n        conversacion_id: conversacionId,\n        sintomas_reportados: $json.sintomas_reportados || \"\",\n        categoria_identificada: $json.categoria_identificada || \"\",\n        flujo_actual: $json.estado_flujo || \"\",\n        token: token\n    }\n};"
+      },
+      "name": "Preparar Contexto",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        240
+      ],
+      "id": "preparar-contexto-update"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/conversaciones/{{ $json.conversacion_id }}/actualizar-contexto/",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"sintomas_reportados\": $json.sintomas_reportados,\n  \"categoria_identificada\": $json.categoria_identificada,\n  \"flujo_actual\": $json.flujo_actual\n} }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "http-actualizar-contexto",
+      "name": "HTTP Request Actualizar Contexto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -192,
+        240
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true,
+      "notes": "Actualiza el contexto de la conversaci\u00f3n en la BD"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log de respuesta\nconst success = $json.success !== false;\n\nconsole.log(JSON.stringify({\n    level: success ? 'INFO' : 'ERROR',\n    timestamp: new Date().toISOString(),\n    operation: 'ACTUALIZAR_CONTEXTO_RESPONSE',\n    success,\n    conversacion_id: $('Preparar Contexto').item.json.conversacion_id,\n    response: $json\n}));\n\nreturn {\n    json: {\n        success: success,\n        mensaje: success ? 'Contexto actualizado correctamente' : 'Error al actualizar contexto',\n        conversacion_id: $('Preparar Contexto').item.json.conversacion_id\n    }\n};"
+      },
+      "name": "Log Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        32,
+        240
+      ],
+      "id": "log-response-contexto"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n// ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la clínica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        240
+      ],
+      "id": "config-s8ijdr9pp",
+      "name": "CONFIG"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Contexto": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Actualizar Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Actualizar Contexto": {
+      "main": [
+        [
+          {
+            "node": "Log Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Preparar Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "9sFXatCtx2KpJqLm",
+  "active": false,
+  "tags": []
+}

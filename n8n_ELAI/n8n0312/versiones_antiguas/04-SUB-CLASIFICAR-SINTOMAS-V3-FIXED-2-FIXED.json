@@ -1,0 +1,154 @@
+{
+  "name": "04-SUB-CLASIFICAR-SINTOMAS-V3-FIXED",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "sintomas"
+            },
+            {
+              "name": "paciente_id",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -192,
+        -96
+      ],
+      "id": "7dc8045d-0d23-4e8e-9672-95ab18a4398d",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== PREPARAR PROMPT PARA CLASIFICACIÓN IA =====\n\nconst sintomas = ($json.sintomas || \"\").trim();\nconst pacienteId = Number($json.paciente_id);\n\nconsole.log('=== CLASIFICAR SÍNTOMAS ===');\nconsole.log('Síntomas:', sintomas);\nconsole.log('Paciente ID:', pacienteId);\n\nif (!sintomas || sintomas.length === 0) {\n    throw new Error('❌ No se proporcionaron síntomas para clasificar');\n}\n\nif (isNaN(pacienteId) || pacienteId === 0) {\n    throw new Error('❌ ID de paciente inválido');\n}\n\nconst prompt = `Eres un asistente médico experto en triaje inicial.\n\nCLASIFICA estos síntomas en UNA de estas categorías:\n\n**CATEGORÍAS DISPONIBLES:**\n1. **general** - Medicina General (dolores comunes, fiebre, gripe, malestar general)\n2. **citologia** - Ginecología (salud reproductiva femenina, citología, planificación)\n3. **odontologia** - Odontología (dolor dental, caries, limpieza, ortodoncia)\n\n**SÍNTOMAS DEL PACIENTE:**\n\"${sintomas}\"\n\n**INSTRUCCIONES:**\n- Analiza cuidadosamente los síntomas\n- Selecciona la categoría MÁS apropiada\n- Si hay duda, prioriza \"general\"\n- Proporciona una razón breve de tu decisión\n\n**RESPONDE SOLO EN ESTE FORMATO JSON:**\n\\`\\`\\`json\n{\n  \"categoria\": \"general\" | \"citologia\" | \"odontologia\",\n  \"confianza\": 0.0-1.0,\n  \"razon\": \"explicación breve en 1 línea\"\n}\n\\`\\`\\``;\n\nreturn {\n    json: {\n        prompt: prompt,\n        sintomas_originales: sintomas,\n        paciente_id: pacienteId\n    }\n};"
+      },
+      "name": "Preparar Prompt Clasificación",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        48,
+        -96
+      ],
+      "id": "b21ca228-86fa-4d18-9f53-2157191fee29"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 200,
+          "temperature": 0.3
+        }
+      },
+      "name": "OpenAI - Clasificar con IA",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [
+        256,
+        -96
+      ],
+      "id": "c52cde80-fb7f-42c3-a04f-e3d2a12f4dbf",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== PARSEAR RESPUESTA DE LA IA =====\n\nconst prevNode = $input.first();\nconst rawResponse = prevNode?.json?.message?.content || prevNode?.json?.text || \"\";\nconst sintomasOriginales = $('Preparar Prompt Clasificación').item.json.sintomas_originales;\nconst pacienteId = $('Preparar Prompt Clasificación').item.json.paciente_id;\n\nconsole.log('=== PARSEAR CLASIFICACIÓN ===');\nconsole.log('Respuesta IA:', rawResponse);\nconsole.log('Hay error previo:', prevNode?.json?.error ? 'SÍ' : 'NO');\n\nlet clasificacion;\n\n// Si hubo error en OpenAI o respuesta vacía\nif (!rawResponse || rawResponse.length === 0 || prevNode?.json?.error) {\n    console.warn('⚠️ OpenAI falló o no respondió, aplicando fallback...');\n    const textoLower = sintomasOriginales.toLowerCase();\n    \n    if (textoLower.includes('muela') || textoLower.includes('diente') || \n        textoLower.includes('dental') || textoLower.includes('carie') ||\n        textoLower.includes('ortodonc') || textoLower.includes('encia')) {\n        clasificacion = {\n            categoria: 'odontologia',\n            confianza: 0.7,\n            razon: 'Síntomas dentales detectados (fallback)'\n        };\n    } else if (textoLower.includes('citologia') || textoLower.includes('ginecolog') ||\n               textoLower.includes('menstruac') || textoLower.includes('embaraz') ||\n               textoLower.includes('ovario') || textoLower.includes('uterino')) {\n        clasificacion = {\n            categoria: 'citologia',\n            confianza: 0.7,\n            razon: 'Síntomas ginecológicos detectados (fallback)'\n        };\n    } else {\n        clasificacion = {\n            categoria: 'general',\n            confianza: 0.6,\n            razon: 'Clasificación por defecto - síntomas generales (fallback)'\n        };\n    }\n} else {\n    try {\n        // Intentar extraer JSON de la respuesta\n        const jsonMatch = rawResponse.match(/\\{[^}]+\\}/);\n        \n        if (!jsonMatch) {\n            throw new Error('No se encontró JSON en la respuesta');\n        }\n        \n        clasificacion = JSON.parse(jsonMatch[0]);\n        \n        // Validar estructura\n        if (!clasificacion.categoria || clasificacion.confianza === undefined) {\n            throw new Error('JSON inválido - faltan campos requeridos');\n        }\n        \n        // Validar categoría\n        const categoriasValidas = ['general', 'citologia', 'odontologia'];\n        if (!categoriasValidas.includes(clasificacion.categoria)) {\n            throw new Error(`Categoría inválida: ${clasificacion.categoria}`);\n        }\n        \n        console.log('✅ Clasificación exitosa desde IA:', clasificacion.categoria);\n        \n    } catch (error) {\n        console.error('❌ Error parseando respuesta IA:', error.message);\n        console.log('Aplicando fallback basado en keywords...');\n        \n        // Fallback: clasificación por keywords\n        const textoLower = sintomasOriginales.toLowerCase();\n        \n        if (textoLower.includes('muela') || textoLower.includes('diente') || \n            textoLower.includes('dental') || textoLower.includes('carie') ||\n            textoLower.includes('ortodonc') || textoLower.includes('encia')) {\n            clasificacion = {\n                categoria: 'odontologia',\n                confianza: 0.7,\n                razon: 'Síntomas dentales detectados (fallback)'\n            };\n        } else if (textoLower.includes('citologia') || textoLower.includes('ginecolog') ||\n                   textoLower.includes('menstruac') || textoLower.includes('embaraz') ||\n                   textoLower.includes('ovario') || textoLower.includes('uterino')) {\n            clasificacion = {\n                categoria: 'citologia',\n                confianza: 0.7,\n                razon: 'Síntomas ginecológicos detectados (fallback)'\n            };\n        } else {\n            clasificacion = {\n                categoria: 'general',\n                confianza: 0.6,\n                razon: 'Clasificación por defecto - síntomas generales (fallback)'\n            };\n        }\n        \n        console.log('🔄 Fallback aplicado:', clasificacion.categoria);\n    }\n}\n\n// Mapeo a nombres completos de especialidad\nconst especialidadNombres = {\n    'general': 'Medicina General',\n    'citologia': 'Ginecología',\n    'odontologia': 'Odontología'\n};\n\nconsole.log('=== RESULTADO FINAL ===');\nconsole.log('Categoría:', clasificacion.categoria);\nconsole.log('Especialidad:', especialidadNombres[clasificacion.categoria]);\n\nreturn {\n    json: {\n        success: true,\n        categoria: clasificacion.categoria,\n        confianza: Number(clasificacion.confianza),\n        razon: clasificacion.razon || 'Sin razón especificada',\n        especialidad_sugerida: especialidadNombres[clasificacion.categoria],\n        sintomas_originales: sintomasOriginales,\n        paciente_id: pacienteId\n    }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "eadec1dc-8d86-443a-89ce-a80efa260c56",
+      "name": "Parsear Clasificación"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n  // ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n  const CONFIG = {\n    // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n    BACKEND_NGROK_URL: \"https://e5d3dba10ea2.ngrok-free.app\",\n\n    // Ngrok headers (no cambiar)\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n\n    // Contacto de la clínica\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  // Pasar CONFIG + datos del trigger anterior\n  return {\n    json: {\n      ...CONFIG,\n      ...$json  // Preserva datos anteriores\n    }\n  };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CONFIG",
+      "id": "5878fec0-3435-4a66-8c26-20970bc91d51",
+      "position": [
+        8,
+        -96
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Prompt Clasificación": {
+      "main": [
+        [
+          {
+            "node": "OpenAI - Clasificar con IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI - Clasificar con IA": {
+      "main": [
+        [
+          {
+            "node": "Parsear Clasificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Preparar Prompt Clasificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ff1da946-5184-4f8d-a121-4c67a0688a49",
+  "meta": {
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "kyx3rXvRdEs2rXN2",
+  "tags": []
+}

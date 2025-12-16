@@ -1,0 +1,451 @@
+{
+  "name": "06-SUB-AGENDAR-CITA-OPTIMIZED",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ada55983-baf6-4061-8e20-526d5eb018af",
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [
+        -1328,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "id": "e58a4643-7e22-4c80-a683-76828d610cf2",
+      "name": "Redis: Start Typing",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1104,
+        208
+      ],
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.BACKEND_URL }}/api/v1/slots/{{ $json.slot_id }}/lock/",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_id",
+              "value": "={{ $json.session_id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "b6f75002-b663-4c76-a19b-56e611e5f9e2",
+      "name": "Lock Slot (30s)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -880,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "lock-success",
+              "leftValue": "={{ $json.lock_token }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c3844526-8cbf-4e1f-bcfa-1c09262c37df",
+      "name": "Lock Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/citas/",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  slot: $json.slot_id,\n  paciente: $json.paciente_id,\n  telefono: $json.session_id,\n  motivo_consulta: $json.motivo_consulta || 'Consulta general',\n  observaciones_paciente: $json.sintomas || '',\n  lock_token: $('Lock Slot (30s)').first().json.lock_token\n}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "f667f0ac-24c3-44f9-b3fd-d225db83b3af",
+      "name": "Crear Cita (Transaction Lock)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cita-created",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4327200d-f619-4cd7-9bff-71978d4aca7a",
+      "name": "Cita Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "id": "fb5d9f03-73ad-4e0f-871c-2e52e407ba15",
+      "name": "Redis: Stop Typing (Success)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}/{{ $env.WHATSAPP_PHONE_ID }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  messaging_product: 'whatsapp',\n  to: $('Start').first().json.session_id,\n  type: 'text',\n  text: {\n    body: '✅ ¡Cita confirmada!\\n\\n📅 ' + $json.fecha_formateada + '\\n🕐 ' + $json.hora_cita + '\\n👨‍⚕️ ' + $json.medico_nombre + '\\n\\nTe enviaremos un recordatorio antes de tu cita. ¡Nos vemos pronto! 😊'\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "96812f6a-58de-4ea2-a1fa-c92cff8f39d8",
+      "name": "Send Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "id": "6fee43c7-a590-4af3-9888-51c608b9e3de",
+      "name": "Redis: Stop Typing (Error)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}/{{ $env.WHATSAPP_PHONE_ID }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  messaging_product: 'whatsapp',\n  to: $('Start').first().json.session_id,\n  type: 'text',\n  text: {\n    body: '❌ Lo siento, ese horario acaba de ser ocupado por otro paciente.\\n\\n¿Quieres que te muestre otros horarios disponibles? 😊'\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "108a2240-1706-4579-8e5b-7fec63e3a84f",
+      "name": "Send Error Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "id": "bcd5ae32-c181-4557-a086-49dd66d54a13",
+      "name": "Redis: Stop Typing (Lock Failed)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}/{{ $env.WHATSAPP_PHONE_ID }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  messaging_product: 'whatsapp',\n  to: $('Start').first().json.session_id,\n  type: 'text',\n  text: {\n    body: '⏳ Ese horario está siendo reservado por otro paciente en este momento.\\n\\nPor favor intenta de nuevo en ' + ($('Lock Slot (30s)').first().json.expires_in || 30) + ' segundos, o elige otro horario. 😊'\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "12f57e41-8c22-4cd5-a189-7df612a26916",
+      "name": "Send Lock Busy Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n  // ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n  const CONFIG = {\n    // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n    BACKEND_NGROK_URL: \"https://e5d3dba10ea2.ngrok-free.app\",\n\n    // Ngrok headers (no cambiar)\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n\n    // Contacto de la clínica\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  // Pasar CONFIG + datos del trigger anterior\n  return {\n    json: {\n      ...CONFIG,\n      ...$json  // Preserva datos anteriores\n    }\n  };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CONFIG",
+      "id": "9be85a58-05c6-4e29-a2c6-3358b3d39818",
+      "position": [
+        -1128,
+        208
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Start Typing": {
+      "main": [
+        [
+          {
+            "node": "Lock Slot (30s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Slot (30s)": {
+      "main": [
+        [
+          {
+            "node": "Lock Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Success?": {
+      "main": [
+        [
+          {
+            "node": "Crear Cita (Transaction Lock)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redis: Stop Typing (Lock Failed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Cita (Transaction Lock)": {
+      "main": [
+        [
+          {
+            "node": "Cita Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cita Created?": {
+      "main": [
+        [
+          {
+            "node": "Redis: Stop Typing (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redis: Stop Typing (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Stop Typing (Success)": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Stop Typing (Error)": {
+      "main": [
+        [
+          {
+            "node": "Send Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Stop Typing (Lock Failed)": {
+      "main": [
+        [
+          {
+            "node": "Send Lock Busy Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Redis: Start Typing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "46fdd8e7-fb0a-4282-9960-29b2a8943893",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "KYCjF4ouAcBr00vC",
+  "tags": []
+}

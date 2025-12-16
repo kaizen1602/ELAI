@@ -1,0 +1,176 @@
+{
+  "name": "10-SUB-FINALIZAR-CONVERSACION",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "conversacion_id",
+              "type": "string",
+              "required": true,
+              "description": "ID de la conversaci\u00f3n a finalizar"
+            },
+            {
+              "name": "token",
+              "type": "string",
+              "required": true,
+              "description": "Token JWT para autenticaci\u00f3n"
+            },
+            {
+              "name": "motivo_cierre",
+              "type": "string",
+              "required": false,
+              "description": "Motivo del cierre (ej: COMPLETADO, USUARIO_DESCONECTADO, TIMEOUT)"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -640,
+        320
+      ],
+      "id": "trigger-finalizar",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar y preparar datos\nconst conversacionId = $json.conversacion_id; // CUID String\nconst token = $json.token;\nconst motivoCierre = $json.motivo_cierre || 'COMPLETADO';\n\nif (!conversacionId) {\n    throw new Error('conversacion_id inv\u00e1lido');\n}\n\nreturn {\n    json: {\n        conversacion_id: conversacionId,\n        token: token,\n        motivo_cierre: motivoCierre\n    }\n};"
+      },
+      "name": "Validar y Log",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        320
+      ],
+      "id": "validar-log-finalizar"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/conversaciones/{{ $json.conversacion_id }}/finalizar/",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"motivo_cierre\": $json.motivo_cierre } }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "http-finalizar",
+      "name": "HTTP Request Finalizar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -192,
+        320
+      ],
+      "continueOnFail": true,
+      "alwaysOutputData": true,
+      "notes": "Marca la conversaci\u00f3n como finalizada"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log de respuesta\nconst success = $json.success !== false;\n\nconsole.log(JSON.stringify({\n    level: success ? 'INFO' : 'WARN',\n    timestamp: new Date().toISOString(),\n    operation: 'FINALIZAR_CONVERSACION_RESPONSE',\n    success,\n    conversacion_id: $('Validar y Log').item.json.conversacion_id,\n    response: $json\n}));\n\nreturn {\n    json: {\n        success: success,\n        mensaje: success ? 'Conversaci\u00f3n finalizada correctamente' : 'Error al finalizar conversaci\u00f3n',\n        conversacion_id: $('Validar y Log').item.json.conversacion_id\n    }\n};"
+      },
+      "name": "Log Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        32,
+        320
+      ],
+      "id": "log-response-finalizar"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n// ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la clínica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        320
+      ],
+      "id": "config-sridbx1y7",
+      "name": "CONFIG"
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y Log": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Finalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Finalizar": {
+      "main": [
+        [
+          {
+            "node": "Log Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Validar y Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "10-SUB-FINALIZAR-CONVERSACION",
+  "tags": []
+}

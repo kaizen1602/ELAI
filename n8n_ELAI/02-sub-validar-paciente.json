@@ -1,0 +1,567 @@
+{
+  "name": "02-SUB-VALIDAR-PACIENTE-V2",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "query"
+            },
+            {
+              "name": "session_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -800,
+        300
+      ],
+      "id": "trigger",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== EXTRAER Y VALIDAR DOCUMENTO =====\n\nconst query = ($json.query || '').toString().trim();\nconst session_id = $json.session_id;\n\nconsole.log('=== VALIDAR PACIENTE - INICIO ===');\nconsole.log('Query recibido:', query);\nconsole.log('Session ID:', session_id);\n\n// Validar que query tenga contenido\nif (!query || query.length === 0) {\n  console.error('\u274c Query vac\u00edo');\n  return {\n    json: {\n      success: false,\n      error: 'QUERY_VACIO',\n      mensaje: 'No encontr\u00e9 un n\u00famero de documento. Por favor, env\u00edame tu c\u00e9dula (solo n\u00fameros). \ud83d\ude0a',\n      session_id,\n      documento: '',\n      documento_valido: false\n    }\n  };\n}\n\n// Extraer SOLO d\u00edgitos\nconst soloDigitos = query.replace(/[^0-9]/g, '');\nconst esValido = soloDigitos.length >= 8 && soloDigitos.length <= 15;\n\nconsole.log('D\u00edgitos extra\u00eddos:', soloDigitos);\nconsole.log('Longitud:', soloDigitos.length);\nconsole.log('\u00bfEs v\u00e1lido?:', esValido);\n\nif (!esValido) {\n  return {\n    json: {\n      success: false,\n      error: 'DOCUMENTO_INVALIDO',\n      mensaje: `Hmm, ese n\u00famero no parece correcto \ud83e\udd14\\n\\nPor favor, env\u00edame tu c\u00e9dula completa (entre 8 y 15 d\u00edgitos).`,\n      session_id,\n      documento: soloDigitos,\n      documento_valido: false\n    }\n  };\n}\n\nreturn {\n  json: {\n    success: true,\n    session_id,\n    documento: soloDigitos,\n    documento_valido: true\n  }\n};"
+      },
+      "name": "Extraer y Validar Documento",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        300
+      ],
+      "id": "extraer-documento"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "doc-valido",
+              "leftValue": "={{ $json.documento_valido }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        300
+      ],
+      "id": "if-documento-valido",
+      "name": "\u00bfDocumento V\u00e1lido?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/whatsapp/validate-patient",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {},
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').item.json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"documento\": $('Extraer y Validar Documento').item.json.documento } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "Buscar Paciente en Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -80,
+        200
+      ],
+      "id": "buscar-paciente",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "paciente-existe",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        160,
+        200
+      ],
+      "id": "if-paciente-existe",
+      "name": "\u00bfPaciente Encontrado?"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/whatsapp/conversations/{{ $('Extraer y Validar Documento').item.json.session_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {},
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').item.json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        100
+      ],
+      "id": "consultar-conversacion",
+      "name": "Consultar Conversaci\u00f3n Activa",
+      "notes": "Verifica si ya existe conversaci\u00f3n",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "tiene-id",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "any",
+                "operation": "exists"
+              }
+            },
+            {
+              "id": "no-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "any",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        640,
+        100
+      ],
+      "id": "if-conversacion-existe",
+      "name": "\u00bfConversaci\u00f3n Existe?"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== CONVERSACI\u00d3N YA EXISTE - RETORNAR DATOS =====\n\nconst pacienteResponse = $('Buscar Paciente en Backend').first().json;\nconst conversacionResponse = $('Consultar Conversaci\u00f3n Activa').first().json;\n\nconsole.log('\u2705 CONVERSACI\u00d3N EXISTENTE');\n\n// Acceder a la data anidada (Backend response format: { success: true, data: { ... } })\nconst paciente = pacienteResponse.data && pacienteResponse.data.paciente ? pacienteResponse.data.paciente : {};\nconst conversacion = conversacionResponse.data ? conversacionResponse.data : conversacionResponse;\n\nconsole.log('Paciente:', paciente.nombres);\nconsole.log('Conversaci\u00f3n ID:', conversacion.id);\n\n// Usar IDs como strings (CUIDs)\nconst pacienteId = paciente.id;\nconst entidadMedicaId = paciente.entidadMedicaId;\nconst conversacionId = conversacion.id;\n\nif (!pacienteId || !entidadMedicaId || !conversacionId) {\n    console.error('\u274c Error extrayendo IDs');\n    return {\n        json: {\n            success: false,\n            error: 'DATA_ERROR',\n            mensaje: 'Ups, algo sali\u00f3 mal con tus datos. \u00bfIntentamos de nuevo? \ud83d\ude0a'\n        }\n    };\n}\n\nreturn {\n    json: {\n        success: true,\n        paciente_id: pacienteId,\n        nombre: paciente.nombres || 'Usuario', // Backend devuelve 'nombres'\n        documento: paciente.numeroDocumento, // Backend devuelve 'numeroDocumento'\n        entidad_medica_id: entidadMedicaId,\n        conversacion_id: conversacionId,\n        mensaje: `\u00a1Hola de nuevo, ${paciente.nombres}! \ud83d\ude0a\\n\u00bfEn qu\u00e9 puedo ayudarte hoy?`\n    }\n};"
+      },
+      "name": "Respuesta - Conversaci\u00f3n Existe",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        880,
+        0
+      ],
+      "id": "respuesta-existe"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/whatsapp/conversation",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {},
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').item.json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"session_id\": $('Extraer y Validar Documento').first().json.session_id,\n  \"paciente\": $('Buscar Paciente en Backend').first().json.data.paciente.id,\n  \"entidad_medica\": $('Buscar Paciente en Backend').first().json.data.paciente.entidadMedicaId,\n  \"estado\": \"ACTIVO\"\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        200
+      ],
+      "id": "crear-conversacion",
+      "name": "Crear Nueva Conversaci\u00f3n",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== NUEVA CONVERSACI\u00d3N CREADA =====\n\nconst pacienteResponse = $('Buscar Paciente en Backend').first().json;\nconst conversacionResponse = $json;\n\nconsole.log('\u2705 NUEVA CONVERSACI\u00d3N');\n\n// Ajustar acceso a datos (anidados en data.paciente)\nconst paciente = pacienteResponse.data && pacienteResponse.data.paciente ? pacienteResponse.data.paciente : {};\nconst conversacion = conversacionResponse.data ? conversacionResponse.data : conversacionResponse;\n\n// Validar error\nif (conversacionResponse.error) {\n    console.error('\u274c Error:', conversacionResponse.error);\n    if (conversacionResponse.error.message && conversacionResponse.error.message.includes('already exists')) {\n        console.log('\u26a0\ufe0f Conversaci\u00f3n ya exist\u00eda');\n    }\n    return {\n        json: {\n            success: false,\n            error: 'ERROR_CREAR_CONVERSACION',\n            mensaje: 'Ups, tuve un problema creando tu sesi\u00f3n. \u00bfReintentamos? \ud83d\ude0a'\n        }\n    };\n}\n\n// Usar IDs como Strings\nconst pacienteId = paciente.id;\nconst entidadMedicaId = paciente.entidadMedicaId;\nconst conversacionId = conversacion.id;\n\nif (!pacienteId || !entidadMedicaId) {\n    console.error('\u274c Error IDs invalidos', { pacienteId, entidadMedicaId });\n    return {\n        json: {\n            success: false,\n            error: 'DATA_ERROR',\n            mensaje: 'Ups, error en los datos. \u00bfReintentamos? \ud83d\ude0a'\n        }\n    };\n}\n\nconsole.log('Paciente:', paciente.nombres);\nconsole.log('Conversaci\u00f3n creada ID:', conversacionId);\n\nreturn {\n    json: {\n        success: true,\n        paciente_id: pacienteId,\n        nombre: paciente.nombres || 'Usuario',\n        documento: paciente.numeroDocumento,\n        entidad_medica_id: entidadMedicaId,\n        conversacion_id: conversacionId,\n        mensaje: `\u00a1Bienvenido/a, ${paciente.nombres}! \ud83d\ude0a\\n\\nEstoy lista para ayudarte. \u00bfQu\u00e9 necesitas hoy?`\n    }\n};"
+      },
+      "name": "Respuesta - Conversaci\u00f3n Creada",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        200
+      ],
+      "id": "respuesta-creada"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "name": "error",
+              "value": "DOCUMENTO_NO_ENCONTRADO",
+              "type": "string"
+            },
+            {
+              "name": "mensaje",
+              "value": "No encontr\u00e9 un registro con ese documento en nuestro sistema \ud83e\udd14\\n\\n\u00bfPodr\u00edas verificar que sea correcto?\\n\\nSi eres nuevo, comun\u00edcate con nosotros:\\n\ud83d\udcde {{ $('CONFIG').first().json.TELEFONO_CLINICA || '(601) 123-4567' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        400,
+        300
+      ],
+      "id": "respuesta-no-encontrado",
+      "name": "Paciente No Encontrado"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "success",
+              "value": "={{ $json.success }}",
+              "type": "boolean"
+            },
+            {
+              "name": "error",
+              "value": "={{ $json.error }}",
+              "type": "string"
+            },
+            {
+              "name": "mensaje",
+              "value": "={{ $json.mensaje }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -80,
+        400
+      ],
+      "id": "respuesta-error-validacion",
+      "name": "Error Validaci\u00f3n Documento"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n// ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la clínica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        300
+      ],
+      "id": "config-3197acgm3",
+      "name": "CONFIG"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/whatsapp/conversation",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {},
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').item.json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"session_id\": $('Extraer y Validar Documento').first().json.session_id,\n  \"paciente\": $('Buscar Paciente en Backend').first().json.data.paciente.id,\n  \"entidad_medica\": $('Buscar Paciente en Backend').first().json.data.paciente.entidadMedicaId,\n  \"estado\": \"ACTIVO\"\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        100
+      ],
+      "id": "actualizar-conversacion",
+      "name": "Actualizar Conversaci\u00f3n",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer y Validar Documento": {
+      "main": [
+        [
+          {
+            "node": "\u00bfDocumento V\u00e1lido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "\u00bfDocumento V\u00e1lido?": {
+      "main": [
+        [
+          {
+            "node": "Buscar Paciente en Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Validaci\u00f3n Documento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Paciente en Backend": {
+      "main": [
+        [
+          {
+            "node": "\u00bfPaciente Encontrado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "\u00bfPaciente Encontrado?": {
+      "main": [
+        [
+          {
+            "node": "Consultar Conversaci\u00f3n Activa",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Paciente No Encontrado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Conversaci\u00f3n Activa": {
+      "main": [
+        [
+          {
+            "node": "\u00bfConversaci\u00f3n Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "\u00bfConversaci\u00f3n Existe?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar Conversaci\u00f3n",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Crear Nueva Conversaci\u00f3n",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Nueva Conversaci\u00f3n": {
+      "main": [
+        [
+          {
+            "node": "Respuesta - Conversaci\u00f3n Creada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar Conversaci\u00f3n": {
+      "main": [
+        [
+          {
+            "node": "Respuesta - Conversaci\u00f3n Existe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v2-humanizado",
+  "id": "ckNlaeDAgM51IaCy",
+  "tags": []
+}

@@ -1,0 +1,494 @@
+{
+  "name": "05-Consultar_citas",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "categoria"
+            },
+            {
+              "name": "entidad_medica_id",
+              "type": "number"
+            },
+            {
+              "name": "token"
+            },
+            {
+              "name": "page",
+              "type": "number"
+            },
+            {
+              "name": "session_id"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1152,
+        176
+      ],
+      "id": "3eee7441-676d-45ab-a3b5-21f344130eb4",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        176
+      ],
+      "id": "89ab24ca-72e7-408e-816c-ca9702187c24",
+      "name": "Redis Start Typing",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar inputs\nconst categoria = ($json.categoria || '').toLowerCase().trim();\nconst entidadMedicaId = Number($json.entidad_medica_id);\nconst token = $json.token;\nconst page = Number($json.page || 1);\nconst session_id = $json.session_id || 'unknown';\n\nif (!categoria) { throw new Error('No se proporcionó categoría'); }\nif (!entidadMedicaId || isNaN(entidadMedicaId)) { throw new Error('No se proporcionó entidad_medica_id válido'); }\nif (!token) { throw new Error('Token JWT es requerido'); }\nif (!Number.isFinite(page) || page < 1) { throw new Error('page inválido'); }\nif (!/^https?:\\/\\//.test($('CONFIG').first().json.BACKEND_NGROK_URL)) {\n  throw new Error('BACKEND_NGROK_URL debe empezar con http:// o https://');\n}\n\nreturn { json: { categoria, entidad_medica_id: entidadMedicaId, token, page, session_id } };"
+      },
+      "name": "Validar y Preparar",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -608,
+        176
+      ],
+      "id": "6a771733-0829-45ce-8c97-a29f665e1beb"
+    },
+    {
+      "parameters": {
+        "url": "={{ `${$('CONFIG').item.json.BACKEND_NGROK_URL}/api/v1/citas/disponibles/?categoria=${$json.categoria}&entidad_medica_id=${$json.entidad_medica_id}` }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Consultar Citas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        176
+      ],
+      "alwaysOutputData": true,
+      "id": "00d17b1f-695b-4b32-ad29-a8677b7f8b4f",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-results",
+              "leftValue": "={{ ($json.citas && $json.citas.length > 0) || ($json.results && $json.results.length > 0) || (Array.isArray($json) && $json.length > 0) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        176
+      ],
+      "id": "cec7e6d1-66ff-4b00-b2a8-38bf04e70922",
+      "name": "¿Hay Citas Disponibles?"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== FORMATEAR, FILTRAR Y PAGINAR CITAS (SOLO DISPONIBLES/FUTURAS) =====\n\nconst response = $json; // item actual\nconst page = Number($('Validar y Preparar').first().json.page || 1);\nconst pageSize = 10;\n\nlet citasArray = [];\n\n// 1) Si response es un array, puede ser:\n//    a) Array de objetos cita directamente -> tomar response\n//    b) Array con 1 elemento que es el wrapper { success, citas: [...] } -> tomar elemento.citas\nif (Array.isArray(response)) {\n  // si es array de objetos cita (ej: [{slot_id:...}, {slot_id:...}])\n  const looksLikeCitas = response.length > 0 && response.every(it => it && (it.slot_id || it.fecha || it.hora));\n  if (looksLikeCitas) {\n    citasArray = response;\n  } else if (response.length === 1 && response[0] && typeof response[0] === 'object') {\n    // si es un array con un wrapper: [{ success:true, citas: [...] }]\n    const wrapper = response[0];\n    if (Array.isArray(wrapper.citas)) {\n      citasArray = wrapper.citas;\n    } else if (Array.isArray(wrapper.data)) {\n      citasArray = wrapper.data;\n    } else if (Array.isArray(wrapper.results)) {\n      citasArray = wrapper.results;\n    } else {\n      // como fallback, intentar usar directamente el wrapper (por si viene un único objeto cita dentro)\n      citasArray = [wrapper];\n    }\n  } else {\n    // fallback: dejar vacío (no reconocido)\n    citasArray = [];\n  }\n} else if (response && typeof response === 'object') {\n  // 2) Si response es un objeto wrapper\n  if (Array.isArray(response.citas)) {\n    citasArray = response.citas;\n  } else if (Array.isArray(response.results)) {\n    citasArray = response.results;\n  } else if (Array.isArray(response.data)) {\n    citasArray = response.data;\n  } else {\n    // tal vez el objeto ya es una cita única\n    const looksLikeCita = response && (response.slot_id || response.fecha || response.hora);\n    citasArray = looksLikeCita ? [response] : [];\n  }\n}\n\n// DEBUG (opcional): ver qué se recibió\n// console.log('Citas detectadas count:', citasArray.length, JSON.stringify(citasArray.slice(0,2), null, 2));\n\n// Mapear/normalizar y filtrar disponibles\nconst normalizadas = citasArray\n  .map((cita) => ({\n    slot_id: cita.id ?? cita.slot_id ?? cita.pk ?? null,\n    agenda_id: cita.agenda_id ?? cita.agenda ?? null,\n    medico_id: cita.medico_id ?? cita.doctor_id ?? null,\n    fecha: cita.fecha ?? cita.fecha_formateada ?? '',\n    hora: cita.hora ?? cita.hora_cita ?? '',\n    medico: cita.medico_nombre ?? cita.doctor_nombre ?? cita.doctor ?? cita.medico ?? '',\n    especialidad: cita.especialidad_nombre ?? cita.specialty ?? cita.especialidad ?? '',\n    consultorio: cita.consultorio ?? '',\n    disponible: cita.disponible !== false\n  }))\n  .filter((c) => c.disponible === true && c.slot_id);\n\n// Excluir pasadas (fecha/hora ISO)\nconst now = new Date();\nconst yyyy = now.getFullYear();\nconst mm = String(now.getMonth()+1).padStart(2,'0');\nconst dd = String(now.getDate()).padStart(2,'0');\nconst HH = String(now.getHours()).padStart(2,'0');\nconst MM = String(now.getMinutes()).padStart(2,'0');\nconst SS = String(now.getSeconds()).padStart(2,'0');\nconst today = `${yyyy}-${mm}-${dd}`;\nconst currentTime = `${HH}:${MM}:${SS}`;\n\nconst futuras = normalizadas.filter((c) => {\n  if (!c.fecha) return false;\n  if (c.fecha > today) return true;\n  if (c.fecha < today) return false;\n  if (!c.hora) return false;\n  return c.hora >= currentTime;\n});\n\n// Orden estable por fecha+hora\nfuturas.sort((a,b) => (a.fecha + ' ' + a.hora).localeCompare(b.fecha + ' ' + b.hora));\n\nconst total = futuras.length;\nif (total === 0) {\n  return { json: { success: false, mensaje: 'No hay citas disponibles', citas: [], total_citas: 0, page, has_more: false } };\n}\n\n// Paginación 10 en 10\nconst start = (page - 1) * pageSize;\nconst end = start + pageSize;\nconst pagina = futuras.slice(start, end);\n\n// Construir mapeo posición → slot_id (1..10) para el Agente\nconst lista_candidatos = pagina.map((c) => ({ slot_id: c.slot_id, agenda_id: c.agenda_id, fecha: c.fecha, hora: c.hora, medico: c.medico, especialidad: c.especialidad }));\nconst mapa_posiciones = {};\nfor (let i=0;i<lista_candidatos.length;i++){ mapa_posiciones[String(i+1)] = lista_candidatos[i]; }\n\nreturn { json: { success: true, citas: lista_candidatos, total_citas: total, page, has_more: end < total, lista_candidatos, mapa_posiciones } };\n"
+      },
+      "name": "Formatear Citas",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        48,
+        48
+      ],
+      "id": "94efd211-d7d5-4f5e-bd41-8a6f7fbe0cda"
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        496,
+        48
+      ],
+      "id": "d5fb52af-7a23-4a22-80e6-8a25daf3cde4",
+      "name": "Redis Stop Typing (Success)",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "arr",
+              "name": "citas",
+              "value": "=[]",
+              "type": "array"
+            },
+            {
+              "id": "tot",
+              "name": "total_citas",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "msg",
+              "name": "mensaje",
+              "value": "No hay citas disponibles en este momento",
+              "type": "string"
+            },
+            {
+              "id": "page",
+              "name": "page",
+              "value": "={{ $('Validar y Preparar').first().json.page || 1 }}",
+              "type": "string"
+            },
+            {
+              "id": "more",
+              "name": "has_more",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        64,
+        272
+      ],
+      "id": "e29ceda7-a0bd-408b-addf-e701652d2e51",
+      "name": "Sin Citas Disponibles"
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ typing: true, session_id: $json.session_id || 'unknown' }) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        288,
+        272
+      ],
+      "id": "43e83ce6-4cca-4541-b3c3-ed11afc84199",
+      "name": "Redis Stop Typing (Empty)",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const CONFIG = {\n  BACKEND_NGROK_URL: \"https://5e3708b60e02.ngrok-free.app\",\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n  TELEFONO_CLINICA: \"+573001234567\"\n};\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\nreturn {\n  json: {\n    ...CONFIG,\n    ...$json\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CONFIG",
+      "id": "070a756c-31da-47ff-82ee-548b9f44dee4",
+      "position": [
+        -992,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=sophia:slot_map:{{$json.session_id}}",
+        "value": "=={{ JSON.stringify($json.mapa_posiciones) }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        304,
+        128
+      ],
+      "id": "86880c92-35e4-4b0c-85bf-bbf1f9c004b9",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CREAR MAPEO POSICIÓN → SLOT_ID =====\nconst input = $input.all()[0].json;\nconst sessionId = input.session_id || $('When Executed by Another Workflow').first().json.session_id;\n\nconsole.log('=== CREAR MAPEO ===');\nconsole.log('Input:', JSON.stringify(input, null, 2));\n\n// Obtener las citas del resultado\nlet citas = [];\nif (input.citas && Array.isArray(input.citas)) {\n    citas = input.citas;\n} else if (input.resultado && input.resultado.citas) {\n    citas = input.resultado.citas;\n} else if (Array.isArray(input)) {\n    citas = input;\n}\n\nconsole.log('Total citas encontradas:', citas.length);\n\n// Crear mapeo: posición (1-10) → slot_id\nconst mapeo = {};\ncitas.slice(0, 10).forEach((cita, index) => {\n    const posicion = index + 1;\n    mapeo[posicion] = cita.slot_id;\n    console.log(`Posición ${posicion} → Slot ID ${cita.slot_id} (${cita.medico_nombre})`);\n});\n\n// Preparar para guardar en Redis\nconst resultado = {\n    key: `sophia:mapeo:${sessionId}`,\n    value: JSON.stringify(mapeo),\n    ttl: 3600,  // 1 hora\n    session_id: sessionId,\n    mapeo_preview: mapeo,\n    original_data: input  // Pasar los datos originales\n};\n\nconsole.log('Mapeo creado:', mapeo);\nconsole.log('Key Redis:', resultado.key);\n\nreturn { json: resultado };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        400
+      ],
+      "id": "crear-mapeo-id",
+      "name": "Crear Mapeo Posición→SlotID"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $json.key }}",
+        "value": "={{ $json.value }}",
+        "expire": true,
+        "ttl": 3600
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        100,
+        400
+      ],
+      "id": "redis-set-mapeo-id",
+      "name": "Redis: Guardar Mapeo",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Retornar los datos originales para el Agent\nconst input = $input.all()[0].json;\nreturn { json: input.original_data };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        400
+      ],
+      "id": "preparar-respuesta-id",
+      "name": "Preparar Respuesta"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Start Typing": {
+      "main": [
+        [
+          {
+            "node": "Validar y Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y Preparar": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Consultar Citas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Consultar Citas": {
+      "main": [
+        [
+          {
+            "node": "¿Hay Citas Disponibles?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay Citas Disponibles?": {
+      "main": [
+        [
+          {
+            "node": "Formatear Citas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin Citas Disponibles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Citas": {
+      "main": [
+        [
+          {
+            "node": "Crear Mapeo Posición→SlotID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Mapeo Posición→SlotID": {
+      "main": [
+        [
+          {
+            "node": "Redis: Guardar Mapeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Guardar Mapeo": {
+      "main": [
+        [
+          {
+            "node": "Preparar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sin Citas Disponibles": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Empty)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Redis Start Typing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis": {
+      "main": [
+        [
+          {
+            "node": "Redis Stop Typing (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "d13a192b-84d3-438b-9e25-1ea662da586c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "k4DuedyklL6gl6vk",
+  "tags": []
+}

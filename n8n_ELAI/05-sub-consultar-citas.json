@@ -1,0 +1,272 @@
+{
+  "name": "05-SUB-CONSULTAR-CITAS-CORREGIDO",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "categoria"
+            },
+            {
+              "name": "entidad_medica_id",
+              "type": "string"
+            },
+            {
+              "name": "token"
+            },
+            {
+              "name": "page",
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -976,
+        160
+      ],
+      "id": "trigger-in",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar inputs\nconst categoria = ($json.categoria || \"\").toLowerCase().trim();\nconst entidadMedicaId = $json.entidad_medica_id; // String CUID\nconst token = $json.token;\nconst page = Number($json.page || 1);\n\nif (!categoria) { throw new Error('No se proporcion\u00f3 categor\u00eda'); }\nif (!entidadMedicaId) { throw new Error('No se proporcion\u00f3 entidad_medica_id v\u00e1lido'); }\nif (!token) { throw new Error('Token JWT es requerido'); }\n\nreturn { json: { categoria, entidad_medica_id: entidadMedicaId, token, page } };"
+      },
+      "name": "Validar y Preparar",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -736,
+        160
+      ],
+      "id": "validate"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/slots/available-bot/?categoria={{ $json.categoria }}&entidad_medica_id={{ $json.entidad_medica_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').first().json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Consultar Citas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -528,
+        160
+      ],
+      "alwaysOutputData": true,
+      "id": "http-citas",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "has-results",
+              "leftValue": "={ ($json.data && $json.data.length > 0) || ($json.citas && $json.citas.length > 0) || ($json.results && $json.results.length > 0) || (Array.isArray($json) && $json.length > 0) }",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -304,
+        160
+      ],
+      "id": "if-hay",
+      "name": "\u00bfHay Citas Disponibles?"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== FORMATEAR CITAS =====\n\nconst response = $json;\nconst page = Number($('Validar y Preparar').first().json.page || 1);\nconst pageSize = 10;\n\n// Extraer arreglo de data wrapper\nlet citasArray = [];\nif (response.citas && Array.isArray(response.citas)) citasArray = response.citas;\nelse if (response.data && Array.isArray(response.data)) citasArray = response.data;\nelse if (Array.isArray(response)) citasArray = response;\n\n// Helper para formato de fecha\nconst formatFecha = (fechaStr, horaStr) => {\n    try {\n        const d = new Date(fechaStr);\n        const dias = ['Domingo', 'Lunes', 'Martes', 'Mi\u00e9rcoles', 'Jueves', 'Viernes', 'S\u00e1bado'];\n        const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];\n        \n        const diaNombre = dias[d.getDay()];\n        const mesNombre = meses[d.getMonth()];\n        const diaNum = d.getDate();\n        \n        return `${diaNombre} ${diaNum} ${mesNombre}`;\n    } catch(e) { return fechaStr; }\n};\n\n// Mapear normalizadas\nconst normalizadas = citasArray\n  .map((cita) => {\n    // Traverse nested structure safely\n    const agenda = cita.agenda || {};\n    const medicoInfo = agenda.medico || {};\n    const userInfo = medicoInfo.user || {};\n    const espInfo = medicoInfo.especialidad || {};\n    \n    const medicoNombre = userInfo.username || cita.medico_nombre || \"Dr. Asignado\";\n    const especialidad = espInfo.nombre || cita.especialidad_nombre || \"General\";\n    \n    const fechaFmt = formatFecha(cita.fecha, cita.horaInicio);\n    const horaFmt = cita.horaInicio || \"00:00\";\n    \n    const display = `\ud83d\uddd3\ufe0f ${fechaFmt} - \u23f0 ${horaFmt} | \ud83d\udc68\u200d\u2695\ufe0f ${medicoNombre}`;\n\n    return {\n        slot_id: cita.id,\n        fecha: fechaFmt,\n        hora: horaFmt,\n        medico: medicoNombre,\n        especialidad: especialidad,\n        display_text: display, // Campo amigable para el bot\n        disponible: cita.estado === 'DISPONIBLE'\n    };\n  })\n  .filter((c) => {\n    console.log('\ud83d\udd0d Slot:', c.slot_id, 'Estado:', c.disponible ? 'DISPONIBLE' : 'NO DISPONIBLE', 'Hora:', c.hora);\n    return c.disponible === true && c.slot_id;\n  });\n\nconst total = normalizadas.length;\nconst start = (page - 1) * pageSize;\nconst pagina = normalizadas.slice(start, start + pageSize);\n\nreturn { \n    json: { \n        success: true, \n        citas: pagina, \n        total_citas: total, \n        page, \n        has_more: (start + pageSize) < total \n    } \n};"
+      },
+      "name": "Formatear Citas",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        32
+      ],
+      "id": "format"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ok",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "arr",
+              "name": "citas",
+              "value": "=[]",
+              "type": "array"
+            },
+            {
+              "id": "tot",
+              "name": "total_citas",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "msg",
+              "name": "mensaje",
+              "value": "No hay citas disponibles en este momento",
+              "type": "string"
+            },
+            {
+              "id": "page",
+              "name": "page",
+              "value": "={{ $('Validar y Preparar').first().json.page || 1 }}",
+              "type": "string"
+            },
+            {
+              "id": "more",
+              "name": "has_more",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -80,
+        256
+      ],
+      "id": "no-citas",
+      "name": "Sin Citas Disponibles"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACI\u00d3N CENTRALIZADA =====\n// \u26a0\ufe0f EDITAR AQU\u00cd cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - \u26a0\ufe0f CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la cl\u00ednica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -776,
+        160
+      ],
+      "id": "config-khnei2i2p",
+      "name": "CONFIG"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y Preparar": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Consultar Citas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Consultar Citas": {
+      "main": [
+        [
+          {
+            "node": "\u00bfHay Citas Disponibles?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "\u00bfHay Citas Disponibles?": {
+      "main": [
+        [
+          {
+            "node": "Formatear Citas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sin Citas Disponibles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Validar y Preparar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v1",
+  "id": "TZ2nd8sSxArKFSll",
+  "tags": []
+}

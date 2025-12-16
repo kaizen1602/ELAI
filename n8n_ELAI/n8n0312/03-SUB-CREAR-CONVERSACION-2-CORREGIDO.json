@@ -1,0 +1,230 @@
+{
+  "name": "03-SUB-CREAR-CONVERSACION",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "paciente_id",
+              "type": "number"
+            },
+            {
+              "name": "entidad_medica_id",
+              "type": "number"
+            },
+            {
+              "name": "token"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -208,
+        0
+      ],
+      "id": "30085db9-f01a-44dc-a09b-df8f79b6a3c0",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "try {\n    // Obtener datos del trigger\n    let inputData = $input.all()[0]?.json || $json || {};\n    \n    console.log('=== DATOS RECIBIDOS ===');\n    console.log(JSON.stringify(inputData, null, 2));\n    \n    let sessionId = inputData.session_id;\n    let pacienteId = inputData.paciente_id;\n    let entidadMedicaId = inputData.entidad_medica_id;\n    let token = inputData.token;\n    \n    // Validación mínima\n    if (!sessionId || !pacienteId || !entidadMedicaId || !token) {\n        throw new Error('Faltan datos requeridos');\n    }\n    \n    // Contexto inicial\n    const contextoInicial = {\n        estado_flujo: \"ESPERANDO_SINTOMAS\",\n        fecha_inicio: new Date().toISOString(),\n        sintomas_reportados: null,\n        categoria_identificada: null,\n        cita_seleccionada_id: null,\n        ultimo_mensaje: new Date().toISOString()\n    };\n    \n    return {\n        json: {\n            session_id: sessionId,\n            paciente_id: pacienteId,\n            entidad_medica_id: entidadMedicaId,\n            estado: \"ACTIVO\",\n            contexto: JSON.stringify(contextoInicial),\n            token: token\n        }\n    };\n    \n} catch (error) {\n    console.error('ERROR:', error.message);\n    throw error;\n}"
+      },
+      "name": "Preparar Datos",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        176,
+        0
+      ],
+      "id": "7024c89a-f30b-4782-a0f3-7501aba2e491"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=={{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/conversaciones/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "=={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "=={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').item.json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "session_id",
+              "value": "={{ $json.session_id }}"
+            },
+            {
+              "name": "paciente",
+              "value": "={{ $json.paciente_id }}"
+            },
+            {
+              "name": "entidad_medica",
+              "value": "={{ $json.entidad_medica_id }}"
+            },
+            {
+              "name": "estado",
+              "value": "ACTIVO"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Crear Conversación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        0
+      ],
+      "alwaysOutputData": true,
+      "id": "ed0b5ef3-7923-44b8-922c-232a0b2cc7b1",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "success-flag",
+              "name": "success",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "conversation-id",
+              "name": "conversacion_id",
+              "value": "={{ $json.id }}",
+              "type": "number"
+            },
+            {
+              "id": "session-id",
+              "name": "session_id",
+              "value": "={{ $('Preparar Datos').item.json.session_id }}",
+              "type": "string"
+            },
+            {
+              "id": "estado",
+              "name": "estado",
+              "value": "ACTIVO",
+              "type": "string"
+            },
+            {
+              "id": "token",
+              "name": "token",
+              "value": "={{ $('Preparar Datos').item.json.token }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        624,
+        0
+      ],
+      "id": "1a69bb7b-33a6-48ad-b82f-148e4803ac98",
+      "name": "Formatear Respuesta"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n  // ===== CONFIGURACIÓN CENTRALIZADA =====\n  const CONFIG = {\n    BACKEND_NGROK_URL: \"https://5e3708b60e02.ngrok-free.app\",\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n    N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  return {\n    json: {\n      ...CONFIG,\n      ...$json\n    }\n  };\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "eca9eaa7-7857-4c0f-a56f-15aa21761e2f",
+      "name": "config"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Datos": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Crear Conversación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Crear Conversación": {
+      "main": [
+        [
+          {
+            "node": "Formatear Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "config": {
+      "main": [
+        [
+          {
+            "node": "Preparar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ddd7ed2b-89c8-44e2-8f67-2c19a78c337f",
+  "meta": {
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "W2NCaWgyw87XA6an",
+  "tags": []
+}

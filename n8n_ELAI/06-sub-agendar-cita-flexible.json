@@ -1,0 +1,540 @@
+{
+    "name": "06-SUB-AGENDAR-CITA-MEJORADO",
+    "nodes": [
+        {
+            "parameters": {
+                "workflowInputs": {
+                    "values": [
+                        {
+                            "name": "slot_id"
+                        },
+                        {
+                            "name": "categoria"
+                        },
+                        {
+                            "name": "posicion",
+                            "type": "number"
+                        },
+                        {
+                            "name": "fecha"
+                        },
+                        {
+                            "name": "hora"
+                        },
+                        {
+                            "name": "doctor"
+                        },
+                        {
+                            "name": "criterio_busqueda"
+                        },
+                        {
+                            "name": "paciente_id"
+                        },
+                        {
+                            "name": "motivo_consulta"
+                        },
+                        {
+                            "name": "session_id"
+                        },
+                        {
+                            "name": "token"
+                        },
+                        {
+                            "name": "entidad_medica_id"
+                        }
+                    ]
+                }
+            },
+            "type": "n8n-nodes-base.executeWorkflowTrigger",
+            "typeVersion": 1.1,
+            "position": [
+                -1200,
+                240
+            ],
+            "id": "trigger-in",
+            "name": "When Executed by Another Workflow"
+        },
+        {
+            "parameters": {
+                "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n// ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la clínica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                -1000,
+                240
+            ],
+            "id": "config",
+            "name": "CONFIG"
+        },
+        {
+            "parameters": {
+                "functionCode": "// ===== VALIDAR CRITERIOS =====\n\n// NUEVO: Verificar si viene slot_id directo (preferido)\nconst slotIdDirecto = ($json.slot_id || '').trim();\n\nlet categoria = ($json.categoria || '').trim();\nlet posicion = Number($json.posicion || 0);\nlet fecha = ($json.fecha || '').trim();\nlet hora = ($json.hora || '').trim();\nlet doctor = ($json.doctor || '').trim();\nconst pacienteId = ($json.paciente_id || '').trim();\nconst motivoConsulta = $json.motivo_consulta || 'Consulta programada';\nconst sessionId = $json.session_id;\nconst token = $json.token;\nconst entidadMedicaId = $json.entidad_medica_id;\nconst criterioBusqueda = ($json.criterio_busqueda || '').trim();\n\nconsole.log('🔍 Validar Criterios IN:', { slotIdDirecto, categoria, posicion, fecha, hora, doctor, criterioBusqueda });\n\n// Si tenemos slot_id directo, es el camino preferido (no necesita nueva consulta)\nif (slotIdDirecto) {\n    console.log('✅ Usando slot_id directo:', slotIdDirecto);\n    return { json: {\n        slot_id_directo: slotIdDirecto,\n        usar_slot_directo: true,\n        paciente_id: pacienteId,\n        motivo_consulta: motivoConsulta,\n        session_id: sessionId,\n        token,\n        entidad_medica_id: entidadMedicaId,\n        success: true\n    }};\n}\n\n// FALLBACK: Si no hay parámetros estructurados pero hay criterio_busqueda, intentamos extraer algo básico\nif (!posicion && !fecha && !hora && !doctor && criterioBusqueda) {\n    const texto = criterioBusqueda.toLowerCase();\n    const matchPos = texto.match(/(?:la|opción)\\s+(\\d+)/);\n    if (matchPos) posicion = parseInt(matchPos[1]);\n    const dias = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo', 'hoy', 'mañana'];\n    for (const dia of dias) {\n        if (texto.includes(dia)) { fecha = dia; break; }\n    }\n    const matchHora = texto.match(/(\\d{1,2}:\\d{2})/);\n    if (matchHora) hora = matchHora[1];\n    console.log('🔍 Extracción Fallback:', { posicion, fecha, hora });\n}\n\nconst output = {\n    usar_slot_directo: false,\n    categoria,\n    posicion,\n    fecha,\n    hora,\n    doctor,\n    paciente_id: pacienteId,\n    motivo_consulta: motivoConsulta,\n    session_id: sessionId,\n    token,\n    entidad_medica_id: entidadMedicaId\n};\n\nif (!categoria) {\n    return { json: { ...output, success: false, error: 'Categoría es requerida' } };\n}\n\nif (!posicion && !fecha && !hora && !doctor) {\n    return { json: { ...output, success: false, error: 'No entendí qué cita quieres. Por favor dime algo como \"la primera\", \"la del lunes\" o \"con el Dr. Garcia\".' } };\n}\n\nif (!pacienteId) {\n    return { json: { ...output, success: false, error: 'ID de paciente inválido' } };\n}\n\nif (!token) {\n    return { json: { ...output, success: false, error: 'Token no disponible' } };\n}\n\nreturn { json: { ...output, success: true } };"
+            },
+            "name": "Validar Criterios",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+                -800,
+                240
+            ],
+            "id": "validar-criterios"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "loose"
+                    },
+                    "conditions": [
+                        {
+                            "id": "validacion-ok",
+                            "leftValue": "={{ $json.success }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "equals"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                -600,
+                240
+            ],
+            "id": "if-validacion-ok",
+            "name": "¿Validación OK?"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "name": "success",
+                            "value": false,
+                            "type": "boolean"
+                        },
+                        {
+                            "name": "mensaje",
+                            "value": "={{ $('Validar Criterios').first().json.error }}",
+                            "type": "string"
+                        },
+                        {
+                            "name": "error_tipo",
+                            "value": "validacion_fallida",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                -400,
+                400
+            ],
+            "id": "error-validacion",
+            "name": "Error Validación"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "loose"
+                    },
+                    "conditions": [
+                        {
+                            "id": "usar-slot-directo",
+                            "leftValue": "={{ $json.usar_slot_directo }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "equals"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                -400,
+                80
+            ],
+            "id": "if-usar-slot-directo",
+            "name": "¿Usar Slot Directo?"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/citas/create",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+                            "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+                        },
+                        {
+                            "name": "x-webhook-secret",
+                            "value": "={{ $('CONFIG').first().json.N8N_WEBHOOK_SECRET }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ slotId: $('Validar Criterios').first().json.slot_id_directo, pacienteId: $('Validar Criterios').first().json.paciente_id, motivoConsulta: $('Validar Criterios').first().json.motivo_consulta }) }}",
+                "options": {
+                    "response": {
+                        "response": {
+                            "neverError": true,
+                            "responseFormat": "json"
+                        }
+                    }
+                }
+            },
+            "name": "HTTP Agendar Directo",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -200,
+                -80
+            ],
+            "alwaysOutputData": true,
+            "id": "http-agendar-directo",
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/slots/available-bot/?categoria={{ $('Validar Criterios').first().json.categoria }}&entidad_medica_id={{ $('Validar Criterios').first().json.entidad_medica_id }}",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "={{ 'Bearer ' + $('Validar Criterios').first().json.token }}"
+                        },
+                        {
+                            "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+                            "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+                        },
+                        {
+                            "name": "x-webhook-secret",
+                            "value": "={{ $('CONFIG').first().json.N8N_WEBHOOK_SECRET }}"
+                        }
+                    ]
+                },
+                "options": {
+                    "response": {
+                        "response": {
+                            "neverError": true,
+                            "responseFormat": "json"
+                        }
+                    },
+                    "timeout": 15000
+                }
+            },
+            "name": "HTTP Consultar Slots",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -400,
+                80
+            ],
+            "alwaysOutputData": true,
+            "id": "http-consultar-slots",
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "functionCode": "// ===== FILTRAR SLOTS POR CRITERIOS =====\n\nconst response = $json;\nconst criterios = $('Validar Criterios').first().json;\n\nconsole.log('Filtrar Slots - Criterios:', JSON.stringify(criterios));\nconsole.log('Filtrar Slots - Response:', JSON.stringify(response));\n\n// Extraer slots del response de forma segura\nlet slots = [];\ntry {\n    if (response && response.data && Array.isArray(response.data)) {\n        slots = response.data;\n    } else if (response && response.citas && Array.isArray(response.citas)) {\n        slots = response.citas;\n    } else if (Array.isArray(response)) {\n        slots = response;\n    }\n} catch(e) {\n    console.log('Error extrayendo slots:', e.message);\n}\n\nconsole.log('Total slots disponibles:', slots.length);\n\n// Si no hay slots, retornar error\nif (!slots || slots.length === 0) {\n    return { json: { slots: [], count: 0 } };\n}\n\n// Filtrar por posicion (caso mas comun)\nlet filtered = [];\nconst posicion = Number(criterios.posicion) || 0;\n\nif (posicion > 0 && posicion <= slots.length) {\n    const slotSeleccionado = slots[posicion - 1];\n    if (slotSeleccionado && slotSeleccionado.id) {\n        filtered = [slotSeleccionado];\n        console.log('Slot por posicion ' + posicion + ':', slotSeleccionado.id);\n    }\n} else if (posicion > slots.length) {\n    console.log('Posicion ' + posicion + ' excede slots disponibles ' + slots.length);\n    return { json: { slots: [], count: 0 } };\n}\n\nconsole.log('Slots filtrados:', filtered.length);\n\nreturn { json: { slots: filtered, count: filtered.length } };"
+            },
+            "name": "Filtrar por Criterios",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+                -200,
+                80
+            ],
+            "id": "filtrar-criterios"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "loose"
+                    },
+                    "conditions": [
+                        {
+                            "id": "count-check",
+                            "leftValue": "={{ $json.count }}",
+                            "rightValue": "1",
+                            "operator": {
+                                "type": "number",
+                                "operation": "equals"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                0,
+                80
+            ],
+            "id": "if-count",
+            "name": "¿Cuántos Matches?"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "name": "success",
+                            "value": false,
+                            "type": "boolean"
+                        },
+                        {
+                            "name": "mensaje",
+                            "value": "No hay citas disponibles con esos criterios",
+                            "type": "string"
+                        },
+                        {
+                            "name": "error_tipo",
+                            "value": "slot_no_disponible",
+                            "type": "string"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.4,
+            "position": [
+                200,
+                240
+            ],
+            "id": "no-match",
+            "name": "Sin Coincidencias"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/citas/create",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+                            "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+                        },
+                        {
+                            "name": "x-webhook-secret",
+                            "value": "={{ $('CONFIG').first().json.N8N_WEBHOOK_SECRET }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify({ slotId: $json.slots[0].id, pacienteId: $('Validar Criterios').first().json.paciente_id, motivoConsulta: $('Validar Criterios').first().json.motivo_consulta }) }}",
+                "options": {
+                    "response": {
+                        "response": {
+                            "neverError": true,
+                            "responseFormat": "json"
+                        }
+                    }
+                }
+            },
+            "name": "HTTP Agendar Cita",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                200,
+                -80
+            ],
+            "alwaysOutputData": true,
+            "id": "http-agendar",
+            "continueOnFail": true
+        },
+        {
+            "parameters": {
+                "functionCode": "const response = $json;\nconst data = response.data || response;\n\nconsole.log('📋 Formatear Respuesta:', data);\n\nif (response.error || !data || !data.id) {\n    return {\n        json: {\n            success: false,\n            mensaje: response.error?.message || 'Ups, tuve un error al intentar agendar. ¿Podemos intentar de nuevo?',\n            error_tipo: 'backend_error'\n        }\n    };\n}\n\n// Mensaje \"Humano\"\nconst doctorName = data.slot?.agenda?.medico?.user?.username || 'el doctor';\nconst fechaCita = data.slot?.fecha || ''; \nconst horaCita = data.slot?.horaInicio || '';\n\nreturn {\n    json: {\n        success: true,\n        cita_id: data.id,\n        mensaje: `¡Listo! 🎉 He agendado tu cita para el ${fechaCita} a las ${horaCita} con ${doctorName}. te enviaré los detalles por correo también. ¿Necesitas algo más?`,\n        detalles: {\n            fecha: fechaCita,\n            hora: horaCita,\n            doctor: doctorName,\n            especialidad: data.slot?.agenda?.medico?.especialidad?.nombre\n        }\n    }\n};"
+            },
+            "name": "Formatear Respuesta",
+            "type": "n8n-nodes-base.function",
+            "typeVersion": 1,
+            "position": [
+                400,
+                -80
+            ],
+            "id": "formatear-respuesta"
+        }
+    ],
+    "pinData": {},
+    "connections": {
+        "When Executed by Another Workflow": {
+            "main": [
+                [
+                    {
+                        "node": "CONFIG",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "CONFIG": {
+            "main": [
+                [
+                    {
+                        "node": "Validar Criterios",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Validar Criterios": {
+            "main": [
+                [
+                    {
+                        "node": "¿Validación OK?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "¿Validación OK?": {
+            "main": [
+                [
+                    {
+                        "node": "¿Usar Slot Directo?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Error Validación",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "¿Usar Slot Directo?": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP Agendar Directo",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "HTTP Consultar Slots",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP Agendar Directo": {
+            "main": [
+                [
+                    {
+                        "node": "Formatear Respuesta",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP Consultar Slots": {
+            "main": [
+                [
+                    {
+                        "node": "Filtrar por Criterios",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Filtrar por Criterios": {
+            "main": [
+                [
+                    {
+                        "node": "¿Cuántos Matches?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "¿Cuántos Matches?": {
+            "main": [
+                [
+                    {
+                        "node": "HTTP Agendar Cita",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Sin Coincidencias",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "HTTP Agendar Cita": {
+            "main": [
+                [
+                    {
+                        "node": "Formatear Respuesta",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "versionId": "v1",
+    "id": "N4zzLZIzuIVMtalT",
+    "tags": []
+}

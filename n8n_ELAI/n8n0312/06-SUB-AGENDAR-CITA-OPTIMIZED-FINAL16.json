@@ -1,0 +1,462 @@
+{
+  "name": "06-SUB-AGENDAR-CITA-OPTIMIZED",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "agenda_id",
+              "type": "number"
+            },
+            {
+              "name": "paciente_id",
+              "type": "number"
+            },
+            {
+              "name": "motivo_consulta"
+            },
+            {
+              "name": "sintomas_json"
+            },
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "token"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2736,
+        176
+      ],
+      "id": "4c91b9ee-e730-48e9-9ef5-a03ea45123aa",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== PARSER DE QUERY JSON + RESOLUCIÓN DE POSICIÓN =====\nconst input = $input.all()[0].json;\n\nconsole.log('=== INPUT RECIBIDO ===');\nconsole.log('Input completo:', JSON.stringify(input, null, 2));\n\nlet parsed = {};\n\n// Caso 1: Si viene en 'query' como string JSON\nif (input.query && typeof input.query === 'string') {\n    try {\n        parsed = JSON.parse(input.query);\n        console.log('✓ Query parseado exitosamente:', parsed);\n    } catch (error) {\n        console.error('❌ Error parseando query:', error);\n        parsed = input;\n    }\n}\n// Caso 2: Si viene en 'query' ya parseado\nelse if (input.query && typeof input.query === 'object') {\n    parsed = input.query;\n    console.log('✓ Query ya es objeto:', parsed);\n}\n// Caso 3: Si los parámetros vienen directamente\nelse {\n    parsed = input;\n    console.log('✓ Parámetros directos:', parsed);\n}\n\n// Detectar si viene posición o agenda_id\nconst posicion = parsed.posicion || parsed.position;\nconst agendaId = parsed.agenda_id || parsed.slot_id;\n\nconsole.log('Posición detectada:', posicion);\nconsole.log('Agenda ID detectado:', agendaId);\n\n// Preparar resultado\nconst result = {\n    agenda_id: agendaId,\n    posicion: posicion,\n    paciente_id: parsed.paciente_id,\n    motivo_consulta: parsed.motivo_consulta || 'Consulta general',\n    sintomas_json: parsed.sintomas_json || parsed.sintomas || '',\n    session_id: parsed.session_id,\n    token: parsed.token,\n    tiene_posicion: !!posicion,\n    tiene_agenda_id: !!agendaId\n};\n\nconsole.log('=== OUTPUT PARSEADO ===');\nconsole.log(JSON.stringify(result, null, 2));\n\nreturn { json: result };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2896,
+        176
+      ],
+      "id": "parser-query-json-id",
+      "name": "Parse Query JSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "const CONFIG = {\n  BACKEND_NGROK_URL: \"https://5e3708b60e02.ngrok-free.app\",\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n  TELEFONO_CLINICA: \"+573001234567\"\n};\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\nconsole.log('Input recibido:', $json);\n\nreturn {\n  json: {\n    ...CONFIG,\n    ...$json,\n    slot_id: $json.agenda_id || $json.slot_id\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2496,
+        176
+      ],
+      "id": "9a558b04-3238-40f3-b751-cd1f501f7164",
+      "name": "CONFIG"
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ action: 'start', session_id: $json.session_id, timestamp: Date.now() }) }}"
+      },
+      "id": "48fd8a74-af37-42d3-945c-4245c69d82bf",
+      "name": "Redis: Start Typing",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -2256,
+        176
+      ],
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL + '/api/v1/slots/' + $('CONFIG').first().json.slot_id + '/lock/' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ session_id: $json.session_id }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "64bca111-9a61-4c1a-a11d-3dfe14b7da79",
+      "name": "Lock Slot (5 min)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2016,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "lock-success",
+              "leftValue": "={{ $json.lock_token }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {},
+        "method": "POST"
+      },
+      "id": "4fec6052-a4a3-44be-8f0d-0d5b97d49048",
+      "name": "Lock Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1776,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL + '/api/v1/citas/' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('CONFIG').first().json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  slot: $('CONFIG').first().json.slot_id,\n  paciente: $('CONFIG').first().json.paciente_id,\n  telefono: $('CONFIG').first().json.session_id,\n  motivo_consulta: $('CONFIG').first().json.motivo_consulta || 'Consulta general',\n  observaciones: '',\n  observaciones_paciente: $('CONFIG').first().json.sintomas_json || ''\n}) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "44265de3-e9b1-4797-809d-c86c7b51167f",
+      "name": "Crear Cita (Transaction Lock)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1536,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cita-created",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bf850941-e54e-4bf3-969b-3e70be205366",
+      "name": "Cita Created?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1296,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ action: 'stop', session_id: $('CONFIG').first().json.session_id, timestamp: Date.now() }) }}"
+      },
+      "id": "890ddf28-c6d0-4312-8bdd-fc5b8af51f86",
+      "name": "Redis: Stop Typing (Success)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1072,
+        -32
+      ],
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ action: 'stop', session_id: $('CONFIG').first().json.session_id, timestamp: Date.now() }) }}"
+      },
+      "id": "61ecba18-911d-4b74-957b-aaec21aebe3e",
+      "name": "Redis: Stop Typing (Error)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1072,
+        176
+      ],
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "publish",
+        "channel": "sophia:typing-channel",
+        "messageData": "={{ JSON.stringify({ action: 'stop', session_id: $('CONFIG').first().json.session_id, timestamp: Date.now() }) }}",
+        "method": "POST"
+      },
+      "id": "32b700c2-45c0-430b-8bd5-28f9cbffd9d8",
+      "name": "Redis: Stop Typing (Lock Failed)",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -1536,
+        272
+      ],
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "key": "={{ 'sophia:mapeo:' + $json.session_id }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        -2736,
+        300
+      ],
+      "id": "redis-get-mapeo-id",
+      "name": "Redis: Leer Mapeo",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== RESOLVER SLOT_ID DESDE MAPEO O DIRECTO =====\nconst parsed = $('Parse Query JSON').first().json;\nconst mapeoRedis = $('Redis: Leer Mapeo').first().json;\n\nconsole.log('=== RESOLVER SLOT_ID ===');\nconsole.log('Datos parseados:', parsed);\nconsole.log('Mapeo Redis raw:', mapeoRedis);\n\nlet slotIdFinal = null;\n\n// Si ya viene agenda_id, usarlo directamente\nif (parsed.agenda_id && parsed.agenda_id > 0) {\n    slotIdFinal = parsed.agenda_id;\n    console.log('✓ Usando agenda_id directo:', slotIdFinal);\n}\n// Si viene posición, buscar en el mapeo\nelse if (parsed.posicion) {\n    try {\n        // El valor de Redis puede venir en diferentes formatos\n        let mapeo = null;\n        \n        if (typeof mapeoRedis === 'string') {\n            mapeo = JSON.parse(mapeoRedis);\n        } else if (mapeoRedis.value) {\n            mapeo = JSON.parse(mapeoRedis.value);\n        } else if (typeof mapeoRedis === 'object') {\n            mapeo = mapeoRedis;\n        }\n        \n        console.log('Mapeo parseado:', mapeo);\n        \n        if (mapeo && mapeo[parsed.posicion]) {\n            slotIdFinal = mapeo[parsed.posicion];\n            console.log(`✓ Posición ${parsed.posicion} → Slot ID ${slotIdFinal}`);\n        } else {\n            console.error('❌ No se encontró la posición en el mapeo');\n        }\n    } catch (error) {\n        console.error('❌ Error resolviendo mapeo:', error);\n    }\n}\n\nif (!slotIdFinal) {\n    throw new Error('No se pudo resolver el slot_id. Ni agenda_id ni posición válidos.');\n}\n\nconst result = {\n    ...parsed,\n    slot_id: slotIdFinal,\n    agenda_id: slotIdFinal,\n    resolucion: parsed.agenda_id ? 'directo' : 'mapeo'\n};\n\nconsole.log('=== SLOT_ID RESUELTO ===');\nconsole.log('Slot ID final:', slotIdFinal);\nconsole.log('Método:', result.resolucion);\n\nreturn { json: result };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2576,
+        176
+      ],
+      "id": "resolver-slot-id",
+      "name": "Resolver Slot ID"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Parse Query JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Redis: Start Typing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Start Typing": {
+      "main": [
+        [
+          {
+            "node": "Lock Slot (5 min)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Slot (5 min)": {
+      "main": [
+        [
+          {
+            "node": "Lock Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Success?": {
+      "main": [
+        [
+          {
+            "node": "Crear Cita (Transaction Lock)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redis: Stop Typing (Lock Failed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear Cita (Transaction Lock)": {
+      "main": [
+        [
+          {
+            "node": "Cita Created?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cita Created?": {
+      "main": [
+        [
+          {
+            "node": "Redis: Stop Typing (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redis: Stop Typing (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Query JSON": {
+      "main": [
+        [
+          {
+            "node": "Redis: Leer Mapeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis: Leer Mapeo": {
+      "main": [
+        [
+          {
+            "node": "Resolver Slot ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolver Slot ID": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "cbcf2f65-ceef-437f-b96b-f8a34b6b9d78",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "KYCjF4ouAcBr00vC",
+  "tags": []
+}

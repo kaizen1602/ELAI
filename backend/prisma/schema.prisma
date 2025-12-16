@@ -1,0 +1,490 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ================================
+// AUTHENTICATION & USERS
+// ================================
+
+enum UserRole {
+  SUPERADMIN
+  ADMIN_ENTIDAD
+  MEDICO
+  PACIENTE
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  email     String   @unique
+  password  String
+  rol       UserRole
+  telefono  String?
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  adminEntidad AdminEntidad?
+  medico       Medico?
+
+  @@map("users")
+}
+
+// ================================
+// MEDICAL ENTITIES
+// ================================
+
+enum TipoEntidad {
+  HOSPITAL
+  CLINICA
+  IPS
+  CONSULTORIO
+  LABORATORIO
+}
+
+model EntidadMedica {
+  id                        String       @id @default(cuid())
+  nombre                    String
+  tipoEntidad               TipoEntidad
+  nitRut                    String       @unique
+  direccion                 String
+  ciudad                    String
+  departamentoEstado        String
+  codigoPostal              String?
+  telefonoPrincipal         String
+  telefonoSecundario        String?
+  email                     String
+  emailContacto             String?
+  sitioWeb                  String?
+  permiteCitasOnline        Boolean      @default(true)
+  requiereAutorizacionCitas Boolean      @default(false)
+  activa                    Boolean      @default(true)
+  createdAt                 DateTime     @default(now())
+  updatedAt                 DateTime     @updatedAt
+
+  // Relations
+  adminEntidades AdminEntidad[]
+  medicos        Medico[]
+  pacientes      Paciente[]
+  agendas        Agenda[]
+  conversaciones Conversacion[]
+
+  @@map("entidades_medicas")
+}
+
+model AdminEntidad {
+  id              String         @id @default(cuid())
+  userId          String         @unique
+  entidadMedicaId String
+  permisos        Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  // Relations
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entidadMedica EntidadMedica  @relation(fields: [entidadMedicaId], references: [id], onDelete: Cascade)
+
+  @@map("admin_entidades")
+}
+
+// ================================
+// MEDICAL SYSTEM
+// ================================
+
+model Especialidad {
+  id           String   @id @default(cuid())
+  nombre       String   @unique
+  duracionCita Int      // minutos
+  descripcion  String?
+  activa       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  medicos Medico[]
+
+  @@map("especialidades")
+}
+
+model Medico {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  entidadMedicaId String
+  especialidadId  String
+  numeroLicencia  String   @unique
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entidadMedica EntidadMedica @relation(fields: [entidadMedicaId], references: [id], onDelete: Cascade)
+  especialidad  Especialidad  @relation(fields: [especialidadId], references: [id])
+  agendas       Agenda[]
+
+  @@index([entidadMedicaId, activo])
+  @@index([especialidadId])
+  @@map("medicos")
+}
+
+enum TipoDocumento {
+  CC
+  TI
+  CE
+  PA
+  RC
+  MS
+}
+
+enum Genero {
+  MASCULINO
+  FEMENINO
+  OTRO
+}
+
+enum EstadoCivil {
+  SOLTERO
+  CASADO
+  UNION_LIBRE
+  DIVORCIADO
+  VIUDO
+}
+
+model Paciente {
+  id                          String        @id @default(cuid())
+  entidadMedicaId             String
+  tipoDocumento               TipoDocumento
+  numeroDocumento             String
+  nombres                     String
+  apellidos                   String
+  fechaNacimiento             DateTime
+  genero                      Genero
+  estadoCivil                 EstadoCivil?
+  epsAseguradora              String?
+  tipoSangre                  String?
+  alergias                    String?
+  telefono                    String
+  telefonoSecundario          String?
+  email                       String?
+  direccion                   String
+  ciudad                      String
+  departamento                String
+  codigoPostal                String?
+  contactoEmergenciaNombre    String?
+  contactoEmergenciaTelefono  String?
+  activo                      Boolean       @default(true)
+  createdAt                   DateTime      @default(now())
+  updatedAt                   DateTime      @updatedAt
+
+  // Relations
+  entidadMedica  EntidadMedica  @relation(fields: [entidadMedicaId], references: [id], onDelete: Cascade)
+  citas          Cita[]
+  conversaciones Conversacion[]
+
+  @@unique([entidadMedicaId, tipoDocumento, numeroDocumento])
+  @@index([numeroDocumento])
+  @@index([entidadMedicaId, activo])
+  @@index([email])
+  @@map("pacientes")
+}
+
+// ================================
+// SCHEDULING SYSTEM
+// ================================
+
+enum DiaSemana {
+  LUNES
+  MARTES
+  MIERCOLES
+  JUEVES
+  VIERNES
+  SABADO
+  DOMINGO
+}
+
+model Agenda {
+  id              String    @id @default(cuid())
+  medicoId        String
+  entidadMedicaId String
+  nombre          String
+  diaSemana       DiaSemana
+  horaInicio      String    // HH:mm format
+  horaFin         String    // HH:mm format
+  duracionSlot    Int       // minutos
+  activa          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  medico        Medico        @relation(fields: [medicoId], references: [id], onDelete: Cascade)
+  entidadMedica EntidadMedica @relation(fields: [entidadMedicaId], references: [id], onDelete: Cascade)
+  slots         Slot[]
+
+  @@index([medicoId, activa])
+  @@index([entidadMedicaId, activa])
+  @@map("agendas")
+}
+
+enum EstadoSlot {
+  DISPONIBLE
+  RESERVADO
+  CONFIRMADO
+  CANCELADO
+  BLOQUEADO
+}
+
+model Slot {
+  id             String     @id @default(cuid())
+  agendaId       String
+  fecha          DateTime   @db.Date
+  horaInicio     String     // HH:mm format
+  horaFin        String     // HH:mm format
+  estado         EstadoSlot @default(DISPONIBLE)
+  notas          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Relations
+  agenda Agenda  @relation(fields: [agendaId], references: [id], onDelete: Cascade)
+  cita   Cita?
+  lock   SlotLock?
+
+  @@unique([agendaId, fecha, horaInicio])
+  @@index([agendaId, fecha, estado])
+  @@index([fecha, estado])
+  @@map("slots")
+}
+
+model SlotLock {
+  id              String   @id @default(cuid())
+  slotId          String   @unique
+  sessionId       String   // WhatsApp phone number or session ID
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+
+  // Relations
+  slot Slot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("slot_locks")
+}
+
+enum EstadoCita {
+  PENDIENTE
+  CONFIRMADA
+  CANCELADA
+  COMPLETADA
+  NO_ASISTIO
+}
+
+model Cita {
+  id                String     @id @default(cuid())
+  slotId            String     @unique
+  pacienteId        String
+  estado            EstadoCita @default(PENDIENTE)
+  motivoConsulta    String?
+  sintomas          String?
+  notas             String?
+  recordatorioEnviado Boolean  @default(false)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  // Relations
+  slot     Slot     @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  paciente Paciente @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+
+  @@index([pacienteId, estado])
+  @@index([estado, createdAt])
+  @@map("citas")
+}
+
+// ================================
+// WHATSAPP CONVERSATIONS
+// ================================
+
+enum EstadoConversacion {
+  ACTIVA
+  FINALIZADA
+  SUSPENDIDA
+}
+
+model Conversacion {
+  id              String              @id @default(cuid())
+  sessionId       String              @unique // WhatsApp phone number
+  entidadMedicaId String
+  pacienteId      String?
+  estado          EstadoConversacion  @default(ACTIVA)
+  contexto        Json?               // Contexto de la conversación
+  ultimoMensaje   DateTime            @default(now())
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  // Relations
+  entidadMedica EntidadMedica @relation(fields: [entidadMedicaId], references: [id], onDelete: Cascade)
+  paciente      Paciente?     @relation(fields: [pacienteId], references: [id])
+  mensajes      Mensaje[]
+
+  @@index([entidadMedicaId, estado])
+  @@index([pacienteId])
+  @@map("conversaciones")
+}
+
+enum TipoMensaje {
+  TEXTO
+  IMAGEN
+  DOCUMENTO
+  AUDIO
+  VIDEO
+}
+
+enum DireccionMensaje {
+  ENTRANTE
+  SALIENTE
+}
+
+model Mensaje {
+  id              String           @id @default(cuid())
+  conversacionId  String
+  tipo            TipoMensaje      @default(TEXTO)
+  direccion       DireccionMensaje
+  contenido       String
+  metadata        Json?
+  createdAt       DateTime         @default(now())
+
+  // Relations
+  conversacion Conversacion @relation(fields: [conversacionId], references: [id], onDelete: Cascade)
+
+  @@index([conversacionId, createdAt])
+  @@map("mensajes")
+}
+
+// ================================
+// AI USAGE TRACKING (NUEVO - ELAI)
+// ================================
+
+enum ModeloIA {
+  GPT_4O_MINI
+  GPT_4
+  GPT_3_5_TURBO
+}
+
+enum TipoOperacionIA {
+  CLASIFICACION_INTENCION
+  CLASIFICACION_SINTOMAS
+  RESPUESTA_CALIDA
+  AGENTE_CONVERSACIONAL
+}
+
+model AIUsageLog {
+  id                String           @id @default(cuid())
+  entidadMedicaId   String
+  conversacionId    String?
+  sessionId         String
+  modelo            ModeloIA
+  tipoOperacion     TipoOperacionIA
+  tokensPrompt      Int
+  tokensCompletion  Int
+  tokensTotal       Int
+  costoEstimado     Float            // en USD
+  duracionMs        Int?             // duración de la llamada en ms
+  metadata          Json?
+  createdAt         DateTime         @default(now())
+
+  @@index([entidadMedicaId, createdAt])
+  @@index([sessionId, createdAt])
+  @@map("ai_usage_logs")
+}
+
+model AIUsageDaily {
+  id                String   @id @default(cuid())
+  entidadMedicaId   String
+  fecha             DateTime @db.Date
+  modelo            ModeloIA
+  tipoOperacion     TipoOperacionIA
+  totalLlamadas     Int
+  tokensTotal       Int
+  costoTotal        Float    // en USD
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([entidadMedicaId, fecha, modelo, tipoOperacion])
+  @@index([entidadMedicaId, fecha])
+  @@map("ai_usage_daily")
+}
+
+model AIUsageWeekly {
+  id                String   @id @default(cuid())
+  entidadMedicaId   String
+  semana            Int      // ISO week number (1-53)
+  anio              Int
+  modelo            ModeloIA
+  tipoOperacion     TipoOperacionIA
+  totalLlamadas     Int
+  tokensTotal       Int
+  costoTotal        Float    // en USD
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([entidadMedicaId, semana, anio, modelo, tipoOperacion])
+  @@index([entidadMedicaId, semana, anio])
+  @@map("ai_usage_weekly")
+}
+
+model AIUsageMonthly {
+  id                String   @id @default(cuid())
+  entidadMedicaId   String
+  mes               Int      // 1-12
+  anio              Int
+  modelo            ModeloIA
+  tipoOperacion     TipoOperacionIA
+  totalLlamadas     Int
+  tokensTotal       Int
+  costoTotal        Float    // en USD
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([entidadMedicaId, mes, anio, modelo, tipoOperacion])
+  @@index([entidadMedicaId, mes, anio])
+  @@map("ai_usage_monthly")
+}
+
+// ================================
+// CONSUMPTION LIMITS (NUEVO - ELAI)
+// ================================
+
+model ConsumptionLimit {
+  id                   String   @id @default(cuid())
+  entidadMedicaId      String   @unique
+  limiteTokensDiario   Int      @default(10000)
+  limiteTokensSemanal  Int      @default(50000)
+  limiteTokensMensual  Int      @default(150000)
+  alertaUmbralPorcent  Int      @default(80)  // 80%
+  alertasActivas       Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("consumption_limits")
+}
+
+model ConsumptionAlert {
+  id              String   @id @default(cuid())
+  entidadMedicaId String
+  periodo         String   // "daily", "weekly", "monthly"
+  tokensUsados    Int
+  tokensLimite    Int
+  porcentajeUso   Float
+  alertaEnviada   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([entidadMedicaId, periodo, createdAt])
+  @@map("consumption_alerts")
+}

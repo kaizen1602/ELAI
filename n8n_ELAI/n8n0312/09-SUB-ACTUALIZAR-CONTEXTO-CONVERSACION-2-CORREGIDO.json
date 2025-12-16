@@ -1,0 +1,190 @@
+{
+  "name": "09-SUB-ACTUALIZAR-CONTEXTO-CONVERSACION",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "conversacion_id",
+              "type": "number"
+            },
+            {
+              "name": "estado_flujo"
+            },
+            {
+              "name": "sintomas_reportados"
+            },
+            {
+              "name": "categoria_identificada"
+            },
+            {
+              "name": "cita_id",
+              "type": "number"
+            },
+            {
+              "name": "token"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -80,
+        192
+      ],
+      "id": "f0b20c37-371c-42b5-a678-fc81d08bb5fb",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "const CONFIG = {\n  BACKEND_NGROK_URL: \"https://5e3708b60e02.ngrok-free.app\",\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n  TELEFONO_CLINICA: \"+573001234567\"\n};\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\nreturn {\n  json: {\n    ...CONFIG,\n    ...$json\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        192
+      ],
+      "id": "config-gbjV8stx8VvQEMsO",
+      "name": "CONFIG"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Preparar contexto actualizado\nconst conversacionId = Number($json.conversacion_id);\nconst token = $json.token;\n\nif (!conversacionId || isNaN(conversacionId)) {\n    throw new Error('conversacion_id inválido');\n}\n\nif (!token) {\n    throw new Error('Token JWT es requerido');\n}\n\n// Construir contexto con campos individuales (como espera el backend)\nconst sintomasReportados = $json.sintomas_reportados || \"\";\nconst categoriaIdentificada = $json.categoria_identificada || \"\";\nconst flujoActual = $json.estado_flujo || \"\";\n\n// Log estructurado\nconsole.log(JSON.stringify({\n    level: 'INFO',\n    timestamp: new Date().toISOString(),\n    operation: 'ACTUALIZAR_CONTEXTO',\n    conversacion_id: conversacionId,\n    sintomas_reportados: sintomasReportados,\n    categoria_identificada: categoriaIdentificada,\n    flujo_actual: flujoActual\n}));\n\nreturn {\n    json: {\n        conversacion_id: conversacionId,\n        sintomas_reportados: sintomasReportados,\n        categoria_identificada: categoriaIdentificada,\n        flujo_actual: flujoActual,\n        token: token\n    }\n};"
+      },
+      "name": "Preparar Contexto",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        160,
+        192
+      ],
+      "id": "2a2c9ff9-7b2d-4baf-9fd2-13214f11a2f5"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "{{ $vars.BACKEND_NGROK_URL }}/api/v1/conversaciones/{{ $json.conversacion_id }}/actualizar-contexto/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $vars.NGROK_HEADER_NAME }}",
+              "value": "={{ $vars.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').item.json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"sintomas_reportados\": $json.sintomas_reportados,\n  \"categoria_identificada\": $json.categoria_identificada,\n  \"flujo_actual\": $json.flujo_actual\n} }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "79c3abba-d990-4d50-8d3c-fcece073acd7",
+      "name": "HTTP Request Actualizar Contexto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        384,
+        192
+      ],
+      "alwaysOutputData": true,
+      "continueOnFail": true,
+      "notes": "Actualiza el contexto de la conversación en la BD"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log de respuesta\nconst success = $json.success !== false;\n\nconsole.log(JSON.stringify({\n    level: success ? 'INFO' : 'ERROR',\n    timestamp: new Date().toISOString(),\n    operation: 'ACTUALIZAR_CONTEXTO_RESPONSE',\n    success,\n    conversacion_id: $('Preparar Contexto').item.json.conversacion_id,\n    response: $json\n}));\n\nreturn {\n    json: {\n        success: success,\n        mensaje: success ? 'Contexto actualizado correctamente' : 'Error al actualizar contexto',\n        conversacion_id: $('Preparar Contexto').item.json.conversacion_id\n    }\n};"
+      },
+      "name": "Log Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        608,
+        192
+      ],
+      "id": "57c0d152-fb80-4b9c-985b-190df2a3f15a"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Contexto": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Actualizar Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Actualizar Contexto": {
+      "main": [
+        [
+          {
+            "node": "Log Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Preparar Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "eaed7708-95bc-464d-a95a-c20b3abbd864",
+  "meta": {
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "gbjV8stx8VvQEMsO",
+  "tags": []
+}

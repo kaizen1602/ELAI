@@ -1,0 +1,78 @@
+========================================
+🔧 CORRECCIONES APLICADAS - 2025-12-04
+========================================
+
+✅ FLUJO 06 - Lock Slot (30s)
+Archivo: 06-SUB-AGENDAR-CITA-OPTIMIZED-FINAL16.json
+
+Corrección 1: URL del nodo "Lock Slot (5 min)"
+  - ANTES: + $json.slot_id +
+  - DESPUÉS: + $('CONFIG').item.json.slot_id +
+  - Motivo: $json.slot_id era undefined después de Redis
+
+Corrección 2: Token en Authorization header
+  - ANTES: 'Bearer ' + $json.token
+  - DESPUÉS: 'Bearer ' + $('CONFIG').item.json.token
+  - Motivo: $json.token era undefined después de Redis
+
+Corrección 3: session_id en body del POST
+  - ANTES: $json.session_id
+  - DESPUÉS: $('CONFIG').item.json.session_id (verificar si es necesario)
+
+========================================
+
+✅ FLUJO 01 - Workflow Principal
+Archivo: 01-WORKFLOW-PRINCIPAL-ESCALABLE-V3-DECISION-U.V.json
+
+Corrección 1: Mapeo de parámetros en tool_agendar_cita
+  - ANTES: "slot_id": "={{ $json.agenda_id }}"
+  - DESPUÉS: "agenda_id": "={{ $json.agenda_id }}"
+  - Motivo: El flujo 06 espera el parámetro llamado "agenda_id", no "slot_id"
+
+========================================
+
+📋 RESUMEN DE PROBLEMAS RESUELTOS:
+
+1. ✓ URL inválida /api/v1/slots/undefined/lock/
+   → Ahora usa $('CONFIG').item.json.slot_id correctamente
+
+2. ✓ Error "Not found" (404)
+   → El parámetro ahora se llama "agenda_id" como espera el flujo 06
+
+3. ✓ Token undefined en Authorization
+   → Ahora usa $('CONFIG').item.json.token
+
+========================================
+
+🧪 PRÓXIMOS PASOS:
+
+1. Reimportar ambos workflows en n8n:
+   - 01-WORKFLOW-PRINCIPAL-ESCALABLE-V3-DECISION-U.V.json
+   - 06-SUB-AGENDAR-CITA-OPTIMIZED-FINAL16.json
+
+2. Activar los workflows
+
+3. Probar el flujo completo:
+   - Enviar "hola" por WhatsApp
+   - Enviar cédula
+   - Describir síntomas
+   - Seleccionar cita ("quiero la 1")
+   - Verificar que la cita se agenda correctamente
+
+========================================
+
+⚠️ IMPORTANTE:
+
+Si después de reimportar sigues viendo el error, verifica:
+
+1. Que el Agent esté enviando un slot_id válido (número > 0)
+2. Que el slot_id corresponda a un slot que existe en la BD
+3. Que el token JWT sea válido
+4. Que el CONFIG en flujo 06 esté recibiendo todos los parámetros
+
+Ver logs en n8n:
+- Flujo 01 > Ejecuciones > Ver última ejecución
+- Flujo 06 > Ejecuciones > Ver última ejecución
+- Revisar el INPUT del nodo CONFIG en flujo 06
+
+========================================

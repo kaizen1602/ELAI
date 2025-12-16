@@ -1,0 +1,415 @@
+{
+  "name": "06-SUB-AGENDAR-CITA-FINAL-CLEAN",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "agenda_id",
+              "type": "string"
+            },
+            {
+              "name": "paciente_id",
+              "type": "string"
+            },
+            {
+              "name": "motivo_consulta"
+            },
+            {
+              "name": "sintomas_json"
+            },
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "token"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1008,
+        240
+      ],
+      "id": "95651d19-bcc7-4a00-a520-b206f0101e20",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== VALIDAR DATOS Y AGENDA_ID =====\n\nconsole.log('🔍🔍🔍 RAW INPUT TO VALIDAR DATOS:', JSON.stringify($json, null, 2));\nconsole.log('🔍 agenda_id value:', $json.agenda_id);\nconsole.log('🔍 agenda_id type:', typeof $json.agenda_id);\n\nconst slotId = ($json.agenda_id || '').trim(); \nconst pacienteId = ($json.paciente_id || '').trim();\nconst motivoConsulta = $json.motivo_consulta || \"Consulta programada\";\nconst sessionId = $json.session_id;\nconst token = $json.token;\n\nconsole.log('🔍 N8N Validar Input:', { slotId, pacienteId, motivoConsulta, sessionId, token });\n\n// Check if we got the DEBUG fallback value\nif (slotId === 'DEBUG_NO_SLOT_ID_PROVIDED') {\n    console.error('❌❌❌ AI DID NOT PROVIDE slot_id! Using fallback value!');\n    return { json: { \n        success: false, \n        error: 'AI no envió slot_id. La herramienta fue llamada sin el parámetro requerido.',\n        debug_input_slot: $json.agenda_id,\n        paciente_id: pacienteId,\n        slot: slotId,\n        motivo_consulta: motivoConsulta,\n        telefono: sessionId,\n        token: token\n    }};\n}\n\n// Pasamos los datos \"raw\" para debug incluso si fallan (pero marcamos error)\nconst output = {\n    paciente_id: pacienteId,\n    slot: slotId,\n    motivo_consulta: motivoConsulta,\n    telefono: sessionId,\n    token: token,\n    debug_input_slot: $json.agenda_id // Lo que vino realmente\n};\n\nif (!slotId) {\n    console.error('❌ slotId is EMPTY');\n    return { json: { ...output, success: false, error: 'ID de cita (slot_id) VACÍO o nulo. Debes usar el slot_id exacto de las citas disponibles.' } };\n}\n\n// VALIDAR FORMATO CUID - Los CUIDs tienen 25 caracteres y empiezan con 'c'\nconst esCUID = slotId.length >= 20 && slotId.startsWith('c');\nconst esNumerico = /^\\d+$/.test(slotId);\n\nif (!esCUID && !esNumerico) {\n    console.error('❌ slotId format is INVALID:', slotId);\n    return { json: { ...output, success: false, error: 'El slot_id \"' + slotId + '\" NO es válido. DEBES usar el slot_id exacto (ej: cmiyv55bl0021uv2goya48q4j) que recibiste de tool_consultar_citas. NO inventes IDs ni uses horarios como ID.' } };\n}\n\nif (!pacienteId) {\n    console.error('❌ pacienteId is EMPTY');\n    return { json: { ...output, success: false, error: 'ID de paciente inválido.' } };\n}\nif (!token) {\n    console.error('❌ token is EMPTY');\n    return { json: { ...output, success: false, error: 'Token no disponible.' } };\n}\n\nconsole.log('✅ Validation passed! Proceeding with slot:', slotId);\nreturn { json: { ...output, success: true } };"
+      },
+      "name": "Validar Datos",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        240
+      ],
+      "id": "008864ea-0f1f-4dd1-b036-4c548239484d"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "validacion-ok",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        240
+      ],
+      "id": "if-validacion-ok",
+      "name": "¿Validación OK?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "name": "mensaje",
+              "value": "={{ $('Validar Datos').first().json.error }}",
+              "type": "string"
+            },
+            {
+              "name": "error_tipo",
+              "value": "validacion_fallida",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -336,
+        400
+      ],
+      "id": "error-validacion",
+      "name": "Error Validación"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/slots/{{ $('Validar Datos').first().json.slot }}/bot",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Validar Datos').first().json.token }}"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').first().json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "name": "HTTP Verificar Slot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -336,
+        80
+      ],
+      "id": "6e3d5d28-5af7-42d7-9fed-53a77d7278ae",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "slot-disponible",
+              "leftValue": "={{ $json.data && $json.data.estado === 'DISPONIBLE' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        80
+      ],
+      "id": "a0c8aaaf-cd1e-4fa9-a463-76a317ff3d07",
+      "name": "¿Slot Disponible?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "name": "mensaje",
+              "value": "El horario seleccionado no está disponible o no existe (ID Recibido: {{ $('Validar Datos').first().json.debug_input_slot || 'NULO' }}). Por favor elige una de las opciones disponibles que te mostré anteriormente.",
+              "type": "string"
+            },
+            {
+              "name": "error_tipo",
+              "value": "slot_no_disponible",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        -64
+      ],
+      "id": "d872d033-5670-47a3-b762-19302f4adbed",
+      "name": "Slot No Disponible"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/citas/create",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Validar Datos').first().json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').first().json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pacienteId",
+              "value": "={{ $('Validar Datos').first().json.paciente_id }}"
+            },
+            {
+              "name": "slotId",
+              "value": "={{ $('Validar Datos').first().json.slot }}"
+            },
+            {
+              "name": "motivoConsulta",
+              "value": "={{ $('Validar Datos').first().json.motivo_consulta }}"
+            },
+            {
+              "name": "telefono",
+              "value": "={{ $('Validar Datos').first().json.telefono }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Agendar Cita",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        112,
+        208
+      ],
+      "alwaysOutputData": true,
+      "id": "3aa2cd5d-ecb8-4929-8dba-1fa92d798207",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== FORMATEAR RESPUESTA =====\nconst response = $json;\nconst data = response.data ? response.data : response;\n\nconsole.log('🔍 [Formatear Respuesta] Raw response:', JSON.stringify(response, null, 2));\nconsole.log('🔍 [Formatear Respuesta] Extracted data:', JSON.stringify(data, null, 2));\nconsole.log('🔍 [Formatear Respuesta] Has error?', !!response.error);\n\nif (response.error || !data) {\n     console.error('❌ [Formatear Respuesta] ERROR DETECTED:', response.error);\n     return {\n        json: {\n            success: false,\n            mensaje: response.error?.message || 'Error al agendar',\n            error_tipo: 'backend_error'\n        }\n    };\n}\n\nconsole.log('✅ [Formatear Respuesta] Success! Cita ID:', data.id);\nreturn {\n    json: {\n        success: true,\n        cita_id: data.id,\n        mensaje: 'Cita agendada exitosamente',\n        detalles: data\n    }\n};"
+      },
+      "name": "Formatear Respuesta",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        336,
+        208
+      ],
+      "id": "fdaebdae-b20f-4672-bbb0-dc78d72ed0be"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n// ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la clínica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -808,
+        240
+      ],
+      "id": "config-uslq13p87",
+      "name": "CONFIG"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Validar Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Datos": {
+      "main": [
+        [
+          {
+            "node": "¿Validación OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Validación OK?": {
+      "main": [
+        [
+          {
+            "node": "HTTP Verificar Slot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Validación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Verificar Slot": {
+      "main": [
+        [
+          {
+            "node": "¿Slot Disponible?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Slot Disponible?": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Agendar Cita",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slot No Disponible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Agendar Cita": {
+      "main": [
+        [
+          {
+            "node": "Formatear Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "6b2d0421-9334-4f07-a202-319c04920e7d",
+  "tags": []
+}

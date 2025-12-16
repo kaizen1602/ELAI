@@ -1,0 +1,253 @@
+{
+  "name": "07-SUB-LISTAR-CITAS-ACTIVAS-CORREGIDO",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "paciente_id",
+              "type": "number"
+            },
+            {
+              "name": "token"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -688,
+        32
+      ],
+      "id": "ddfc8d81-882a-451c-aff0-64003e3130a3",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar que el paciente_id sea válido\nconst pacienteId = Number($json.paciente_id);\nconst token = $json.token;\n\nconsole.log('=== VALIDAR INPUT ===');\nconsole.log('paciente_id:', pacienteId);\nconsole.log('token presente:', !!token);\n\nif (!pacienteId || isNaN(pacienteId) || pacienteId <= 0) {\n    return {\n        json: {\n            success: false,\n            mensaje: \"ID de paciente inválido o no proporcionado\",\n            total_citas: 0,\n            citas: []\n        }\n    };\n}\n\nif (!token) {\n    return {\n        json: {\n            success: false,\n            mensaje: \"Token JWT es requerido\",\n            total_citas: 0,\n            citas: []\n        }\n    };\n}\n\nreturn {\n    json: {\n        paciente_id: pacienteId,\n        token: token,\n        validated: true\n    }\n};"
+      },
+      "name": "Validar Input",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -304,
+        32
+      ],
+      "id": "69c60847-da87-4607-98b7-cd29b96365ef"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-valid",
+              "leftValue": "={{ $json.validated }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        32
+      ],
+      "id": "207d0020-650d-403a-a861-e5ee46b66851",
+      "name": "¿Input Válido?"
+    },
+    {
+      "parameters": {
+        "url": "{{{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/citas/activas/?paciente_id={{ $json.paciente_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            },
+            {
+              "name": "{{{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "{{{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "name": "HTTP Request Listar Citas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        112,
+        -16
+      ],
+      "id": "24b0f621-8e9c-4df8-a2fc-34c39a83dc69",
+      "alwaysOutputData": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Retornar respuesta de la API\nconst response = $json;\n\nreturn { json: response };"
+      },
+      "name": "Procesar Resultados",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        320,
+        -16
+      ],
+      "id": "905d6b79-6033-4736-b17c-71a148e16620"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-response",
+              "name": "success",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "msg",
+              "name": "mensaje",
+              "value": "ID de paciente inválido",
+              "type": "string"
+            },
+            {
+              "id": "total",
+              "name": "total_citas",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "empty-array",
+              "name": "citas",
+              "value": "=[]",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        112,
+        176
+      ],
+      "id": "d6a5c549-febb-450b-a6fb-9f238da7f0b6",
+      "name": "Error Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "  // ===== CONFIGURACIÓN CENTRALIZADA =====\n  const CONFIG = {\n    BACKEND_NGROK_URL: \"https://e5d3dba10ea2.ngrok-free.app\",\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  return {\n    json: {\n      ...CONFIG,\n      ...$json\n    }\n  };\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        32
+      ],
+      "id": "9131bfc0-fcd2-473f-8a49-e970bbb78981",
+      "name": "config"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Input": {
+      "main": [
+        [
+          {
+            "node": "¿Input Válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Input Válido?": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Listar Citas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Listar Citas": {
+      "main": [
+        [
+          {
+            "node": "Procesar Resultados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "config": {
+      "main": [
+        [
+          {
+            "node": "Validar Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b7c91027-05a0-4e40-b6a0-06855ae0e109",
+  "meta": {
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "aFOrHJWYTqMFyVyn",
+  "tags": []
+}

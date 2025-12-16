@@ -1,0 +1,172 @@
+{
+  "name": "10-SUB-FINALIZAR-CONVERSACION",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "conversacion_id",
+              "type": "number"
+            },
+            {
+              "name": "token"
+            },
+            {
+              "name": "motivo_cierre"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -80,
+        160
+      ],
+      "id": "8d48e31d-720e-468d-ac1c-95122e0aede3",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validar y preparar datos\nconst conversacionId = Number($json.conversacion_id);\nconst token = $json.token;\nconst motivoCierre = $json.motivo_cierre || 'COMPLETADO';\n\nif (!conversacionId || isNaN(conversacionId)) {\n    throw new Error('conversacion_id inválido');\n}\n\nif (!token) {\n    throw new Error('Token JWT es requerido');\n}\n\n// Log estructurado\nconsole.log(JSON.stringify({\n    level: 'INFO',\n    timestamp: new Date().toISOString(),\n    operation: 'FINALIZAR_CONVERSACION',\n    conversacion_id: conversacionId,\n    motivo_cierre: motivoCierre\n}));\n\nreturn {\n    json: {\n        conversacion_id: conversacionId,\n        token: token,\n        motivo_cierre: motivoCierre\n    }\n};"
+      },
+      "name": "Validar y Log",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        160,
+        160
+      ],
+      "id": "e9a74e94-3968-434e-811b-0144e3ccb975"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/conversaciones/{{ $json.conversacion_id }}/finalizar/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"motivo_cierre\": $json.motivo_cierre } }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "6bfc1719-19e5-45da-a77f-6b1a84bd965d",
+      "name": "HTTP Request Finalizar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        384,
+        160
+      ],
+      "alwaysOutputData": true,
+      "continueOnFail": true,
+      "notes": "Marca la conversación como finalizada"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log de respuesta\nconst success = $json.success !== false;\n\nconsole.log(JSON.stringify({\n    level: success ? 'INFO' : 'WARN',\n    timestamp: new Date().toISOString(),\n    operation: 'FINALIZAR_CONVERSACION_RESPONSE',\n    success,\n    conversacion_id: $('Validar y Log').item.json.conversacion_id,\n    response: $json\n}));\n\nreturn {\n    json: {\n        success: success,\n        mensaje: success ? 'Conversación finalizada correctamente' : 'Error al finalizar conversación',\n        conversacion_id: $('Validar y Log').item.json.conversacion_id\n    }\n};"
+      },
+      "name": "Log Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        608,
+        160
+      ],
+      "id": "c3bb9f54-803e-4d55-a13c-4dcb7cc2db42"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n  // ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n  const CONFIG = {\n    // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n    BACKEND_NGROK_URL: \"https://e5d3dba10ea2.ngrok-free.app\",\n\n    // Ngrok headers (no cambiar)\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n\n    // Contacto de la clínica\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  // Pasar CONFIG + datos del trigger anterior\n  return {\n    json: {\n      ...CONFIG,\n      ...$json  // Preserva datos anteriores\n    }\n  };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "name": "CONFIG",
+      "id": "0d240763-08e2-4569-8334-c33f1d32470a",
+      "position": [
+        120,
+        160
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar y Log": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request Finalizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request Finalizar": {
+      "main": [
+        [
+          {
+            "node": "Log Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Validar y Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3408f507-f9ad-4a60-b8ad-acaaf38166b0",
+  "meta": {
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "WAUPn9Y7s4ZTPjWw",
+  "tags": []
+}

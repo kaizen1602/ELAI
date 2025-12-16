@@ -1,0 +1,1 @@
+CREATE DATABASE elai_n8n;

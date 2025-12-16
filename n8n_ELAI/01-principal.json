@@ -1,0 +1,755 @@
+{
+  "name": "01-WORKFLOW-PRINCIPAL-COMPLETO-FIXED-V2",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1680,
+        -48
+      ],
+      "id": "d67e5b66-7eb3-4519-8429-1baa3f33f2c6",
+      "name": "WhatsApp Trigger",
+      "webhookId": "tu-webhook-id",
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "GVZenwuIpclyCRTc",
+          "name": "WhatsApp OAuth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== EXTRAER DATOS DEL MENSAJE DE WHATSAPP =====\nconst data = $json;\nconst sessionId = data?.messages?.[0]?.from || \"unknown\";\nconst messageText = (data?.messages?.[0]?.text?.body || \"\").trim();\nconst contactName = data?.contacts?.[0]?.profile?.name || \"Usuario\";\nconst messageType = data?.messages?.[0]?.type || \"text\";\n\nif (sessionId === \"unknown\") {\n    throw new Error('\u274c No se pudo obtener el n\u00famero de tel\u00e9fono del remitente');\n}\n\nconsole.log('=== MENSAJE WHATSAPP RECIBIDO ===');\nconsole.log('\ud83d\udcf1 Session ID:', sessionId);\nconsole.log('\ud83d\udcac Mensaje:', messageText);\nconsole.log('\ud83d\udc64 Contacto:', contactName);\nconsole.log('\ud83d\udcdd Tipo:', messageType);\n\nreturn {\n    json: {\n        session_id: sessionId,\n        message_text: messageText,\n        contact_name: contactName,\n        message_type: messageType,\n        timestamp: new Date().toISOString()\n    }\n};"
+      },
+      "name": "Extraer Datos",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        -48
+      ],
+      "id": "d37d8012-26df-4da4-9e20-57bb50343069"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('CONFIG').first().json.BACKEND_NGROK_URL }}/api/v1/whatsapp/conversations/{{ $json.session_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "={{ $('CONFIG').first().json.NGROK_HEADER_NAME }}",
+              "value": "={{ $('CONFIG').first().json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "x-webhook-secret",
+              "value": "={{ $('CONFIG').first().json.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        -48
+      ],
+      "id": "07db23b0-61db-4704-89a9-ed971ffbe8a1",
+      "name": "Consultar Conversaci\u00f3n P\u00fablica",
+      "alwaysOutputData": true,
+      "continueOnFail": true,
+      "notes": "Consulta con Auth"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== PREPARAR CONTEXTO UNIFICADO PARA EL AI AGENT (MEJORADO V2) =====\n\nconst datosWhatsApp = $('Extraer Datos').first().json;\nconst respuestaConversacion = $json;\n\nconsole.log('=== PREPARAR CONTEXTO ===');\nconsole.log('Datos WhatsApp:', JSON.stringify(datosWhatsApp, null, 2));\nconsole.log('Respuesta Conversaci\u00f3n:', JSON.stringify(respuestaConversacion, null, 2));\n\n// Inicializar contexto base\nlet contexto = {\n    session_id: datosWhatsApp.session_id,\n    message_text: datosWhatsApp.message_text,\n    contact_name: datosWhatsApp.contact_name,\n    message_type: datosWhatsApp.message_type,\n    timestamp: datosWhatsApp.timestamp,\n    token: null,\n    paciente_id: null,\n    paciente_nombre: null,\n    entidad_medica_id: null,\n    conversacion_id: null,\n    tiene_token: false,\n    es_usuario_nuevo: true,\n    conversacion_activa: false,\n    necesita_nueva_conversacion: false\n};\n\n// Si la respuesta tiene error, asumimos usuario nuevo\nif (respuestaConversacion.error) {\n    console.log('Info: No hay conversacion activa o error:', respuestaConversacion.error);\n    return { json: contexto };\n}\n\n// Extraer data del wrapper { success: true, data: { ... } }\nconst data = respuestaConversacion.data ? respuestaConversacion.data : respuestaConversacion;\n\n// Verificar el estado de la conversacion\nconst estadoConversacion = data.estado || '';\nconst conversacionFinalizada = estadoConversacion === 'FINALIZADA' || estadoConversacion === 'CANCELADA';\n\n// LOGIC UPDATE: Check for ID and PatientID\nconst pacienteId = data.pacienteId || data.paciente_id || (data.paciente && data.paciente.id);\n\nif (data.id && pacienteId) {\n    // Siempre extraer datos del paciente\n    contexto.paciente_id = pacienteId;\n    contexto.entidad_medica_id = data.entidadMedicaId || data.entidad_medica_id || (data.paciente && data.paciente.entidadMedicaId);\n    contexto.paciente_nombre = data.paciente_nombre || (data.paciente && data.paciente.nombres) || datosWhatsApp.contact_name;\n    contexto.token = data.token || 'session-token-' + datosWhatsApp.session_id;\n    contexto.tiene_token = true;\n    contexto.es_usuario_nuevo = false;\n    \n    // IMPORTANTE: Verificar si la conversacion esta activa o finalizada\n    if (conversacionFinalizada) {\n        console.log('Conversacion FINALIZADA - necesita nueva conversacion');\n        contexto.conversacion_activa = false;\n        contexto.necesita_nueva_conversacion = true;\n        contexto.conversacion_id = null; // Forzar creacion de nueva\n    } else {\n        console.log('Conversacion ACTIVA encontrada');\n        contexto.conversacion_activa = true;\n        contexto.conversacion_id = data.id;\n    }\n    \n    contexto.conversacion_estado = estadoConversacion;\n    contexto.conversacion_contexto = data.contexto || {};\n    \n    console.log('Token:', contexto.token);\n    console.log('Paciente ID:', contexto.paciente_id);\n    console.log('Conversacion activa:', contexto.conversacion_activa);\n} else {\n    console.log('Data incompleta para sesion activa:', { id: data.id, pacienteId });\n}\n\nreturn { json: contexto };"
+      },
+      "name": "Preparar Contexto",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        -48
+      ],
+      "id": "0b9d9f23-b587-49b6-919f-de46eaa49c18",
+      "notes": "Unifica datos de WhatsApp + Conversaci\u00f3n con validaci\u00f3n mejorada"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres Sophia, la asistente virtual de la Clínica ELAI. Tu tono es cálido, empático, profesional y muy humano. No suenes robótica. Usa emojis ocasionalmente para dar calidez.\n\n## CONTEXTO ACTUAL\n- Session ID: {{ $json.session_id }}\n- Paciente: {{ $json.paciente_nombre || $json.contact_name }}\n- Paciente ID: {{ $json.paciente_id || 'NO VALIDADO' }}\n- Usuario Nuevo: {{ $json.es_usuario_nuevo ? 'SI' : 'NO' }}\n- Conversacion Activa: {{ $json.conversacion_activa ? 'SI' : 'NO' }}\n- Necesita Nueva Conversacion: {{ $json.necesita_nueva_conversacion ? 'SI' : 'NO' }}\n\n---\n\n## REGLAS PRINCIPALES (SEGUIR EN ORDEN)\n\n### PASO 1 - Identificacion del Paciente\n- Si `Usuario Nuevo = SI` o `Paciente ID = NO VALIDADO`: Saluda y pide el numero de cedula.\n- Si el usuario proporciona un numero de documento: USA `tool_validar_paciente` INMEDIATAMENTE.\n\n### PASO 2 - Paciente Ya Validado\n- Si `Usuario Nuevo = NO` y `Paciente ID` tiene valor: El paciente YA esta registrado.\n- Pregunta directamente: \"Hola [nombre]! En que puedo ayudarte hoy?\"\n- NO pidas cedula de nuevo.\n\n### PASO 3 - Sintomas y Citas\n- Si el usuario describe sintomas (gripa, dolor, malestar, etc): USA `tool_clasificar_sintomas`.\n- Si el usuario pide agendar cita o menciona especialidad: USA `tool_consultar_citas` con la categoria.\n- Categorias validas: 'general', 'odontologia', 'citologia'\n\n### PASO 4 - Seleccion de Cita\n- Cuando el usuario elija una cita de la lista, USA `tool_agendar_cita` con los datos extraidos.\n\n---\n\n## COMO AGENDAR CITAS\nCuando llamas tool_consultar_citas, recibes una lista con slot_id para cada cita. DEBES recordar estos slot_id.\n\nCuando el usuario elija una cita (ej: \"la 4\", \"la primera\"):\n1. Identifica cual slot_id corresponde a esa opcion\n2. Llama tool_agendar_cita con ese slot_id\n\nEjemplo: Si mostraste:\n1. Lunes 08:30 (slot_id: abc123)\n2. Lunes 09:00 (slot_id: def456)\n\nY el usuario dice \"la 2\", usa slot_id=\"def456\"\n\n---\n\n## PRESENTACION DE OPCIONES\nCuando listes citas, hazlo asi (pero NO muestres el slot_id al usuario):\n\n\"Aqui tienes opciones disponibles:\n\n1. Lunes 15 - 08:30 AM con Dr. Garcia\n2. Lunes 15 - 09:00 AM con Dr. Garcia\n...\n\nCual te queda mejor?\"\n\n---\n\n## IMPORTANTE\n- Si ya tienes paciente_id, NO pidas cedula.\n- Usa las herramientas, no solo respondas texto.\n- SIEMPRE usa el slot_id exacto cuando agendas citas.\n- Mensaje del usuario: {{ $json.message_text }}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -720,
+        -48
+      ],
+      "id": "404c6574-cd6d-43e4-b7b1-07f90cfb37ed",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {
+          "maxTokens": 1500,
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -848,
+        224
+      ],
+      "id": "96029bdb-ea4f-4fc0-9f7e-23a8cba7b60a",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "kN9eGOcUH8ITmwxZ",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Preparar Contexto').item.json.session_id }}",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        -640,
+        224
+      ],
+      "id": "a5925a40-a78b-43e6-b7a2-c66c2271ba90",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "9ki9rJRkTsKgQQWJ",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user is new and provides document number. No parameters needed. EXECUTE, don't announce.",
+        "workflowId": {
+          "__rl": true,
+          "value": "ckNlaeDAgM51IaCy",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/ckNlaeDAgM51IaCy",
+          "cachedResultName": "02-SUB-VALIDAR-PACIENTE-V2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $('Preparar Contexto').item.json.session_id  || '' }}",
+            "query": "={{ $('Preparar Contexto').item.json.message_text  || '' }}"
+          },
+          "schema": [
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "21ac024d-8a3b-420c-a545-f065f20f65e5",
+      "name": "tool_validar_paciente",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -496,
+        190
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user describes symptoms (e.g. 'tengo gripa', 'me duele la cabeza', 'simtom'). Provide: sintomas (user text), paciente_id (from context). Returns category. EXECUTE silently. IMPORTANT: Only execute if paciente_id is not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "JNUdDHCXbIWVhtAQ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/JNUdDHCXbIWVhtAQ",
+          "cachedResultName": "04-SUB-CLASIFICAR-SINTOMAS-V3-FIXED"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sintomas": "={{ $fromAI('sintomas', '', 'string') }}",
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id  || '' }}"
+          },
+          "schema": [
+            {
+              "id": "sintomas",
+              "displayName": "sintomas",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "id": "paciente_id",
+              "displayName": "paciente_id",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "34946839-6fdc-4798-af3b-c22654b4c3ed",
+      "name": "tool_clasificar_sintomas",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -272,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY after classification OR when user requests specific specialty (bypass). Provide: categoria (string), entidad_medica_id (from context), page (optional, default 1). Returns appointments with slot_id. EXECUTE silently. IMPORTANT: Only execute if entidad_medica_id is not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "TZ2nd8sSxArKFSll",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/TZ2nd8sSxArKFSll",
+          "cachedResultName": "05-SUB-CONSULTAR-CITAS-CORREGIDO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "categoria": "={{ $fromAI('categoria', '', 'string') }}",
+            "entidad_medica_id": "={{ $('Preparar Contexto').item.json.entidad_medica_id  || '' }}",
+            "token": "={{ $('Preparar Contexto').item.json.token  || '' }}",
+            "page": "={{ $fromAI('page', 1, 'number') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "categoria",
+              "displayName": "categoria",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "entidad_medica_id",
+              "displayName": "entidad_medica_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "page",
+              "displayName": "page",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "d17fe642-5f61-42d0-a6b4-b27ff803745c",
+      "name": "tool_consultar_citas",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -64,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "description": "Usar cuando el usuario elija una cita de la lista. IMPORTANTE: Si tienes el slot_id de la respuesta de tool_consultar_citas, usalo directamente (es el ID exacto de la cita). Si no tienes slot_id, usa categoria y posicion.",
+        "workflowId": {
+          "__rl": true,
+          "value": "N4zzLZIzuIVMtalT",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/N4zzLZIzuIVMtalT",
+          "cachedResultName": "06-SUB-AGENDAR-CITA-MEJORADO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "slot_id": "={{ $fromAI('slot_id', '', 'string') }}",
+            "categoria": "={{ $fromAI('categoria', 'general', 'string') }}",
+            "posicion": "={{ $fromAI('posicion', 0, 'number') }}",
+            "fecha": "",
+            "hora": "",
+            "doctor": "",
+            "criterio_busqueda": "",
+            "motivo_consulta": "Consulta programada",
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id  || '' }}",
+            "session_id": "={{ $('Preparar Contexto').item.json.session_id  || '' }}",
+            "token": "={{ $('Preparar Contexto').item.json.token  || '' }}",
+            "entidad_medica_id": "={{ $('Preparar Contexto').item.json.entidad_medica_id  || '' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "slot_id",
+              "displayName": "slot_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "categoria",
+              "displayName": "categoria",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "posicion",
+              "displayName": "posicion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "8b21e649-165a-4055-8f7b-42f156fd8989",
+      "name": "tool_agendar_cita",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        128,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user wants to cancel. Context provides: paciente_id, token. Returns active appointments list. EXECUTE silently. IMPORTANT: Only execute if paciente_id and token are not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "0ceZZYqfQcExFkTo",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/0ceZZYqfQcExFkTo",
+          "cachedResultName": "07-SUB-LISTAR-CITAS-ACTIVAS-CORREGIDO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id  || '' }}",
+            "token": "={{ $('Preparar Contexto').item.json.token  || '' }}"
+          },
+          "schema": [
+            {
+              "id": "paciente_id",
+              "displayName": "paciente_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "0a6d0ecc-e02d-4da8-9c28-c5f9a475f69c",
+      "name": "tool_cancelar_cita",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        336,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user confirms cancellation. Provide: cita_id (from list). Context provides: paciente_id, token. EXECUTE silently. IMPORTANT: Only execute if paciente_id and token are not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "sDg9x1DV5iXht1L5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/sDg9x1DV5iXht1L5",
+          "cachedResultName": "08-SUB-CONFIRMAR-CANCELACION-CORREGIDO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cita_id": "={{ $fromAI('cita_id', '', 'string') }}",
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id  || '' }}",
+            "token": "={{ $('Preparar Contexto').item.json.token  || '' }}"
+          },
+          "schema": [
+            {
+              "id": "cita_id",
+              "displayName": "cita_id",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "id": "paciente_id",
+              "displayName": "paciente_id",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "e4a6bcc1-2f76-4c69-b2ab-5ea2aa045dde",
+      "name": "tool_confirmar_cancelacion",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        528,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS when user wants to reset, restart, or clear history. EXECUTE silently. Returns success message.",
+        "workflowId": {
+          "__rl": true,
+          "value": "10-SUB-FINALIZAR-CONVERSACION",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/10-SUB-FINALIZAR-CONVERSACION",
+          "cachedResultName": "10-SUB-FINALIZAR-CONVERSACION"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "conversacion_id": "={{ $('Preparar Contexto').item.json.conversacion_id }}",
+            "token": "={{ $('Preparar Contexto').item.json.token }}",
+            "motivo_cierre": "SOLICITUD_USUARIO"
+          },
+          "schema": [
+            {
+              "id": "conversacion_id",
+              "displayName": "conversacion_id",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "id": "motivo_cierre",
+              "displayName": "motivo_cierre",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "tool_finalizar_conversacion",
+      "name": "tool_finalizar_conversacion",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== PREPARAR RESPUESTA FINAL PARA WHATSAPP =====\n\nconst agentOutput = $json;\nconst contexto = $('Preparar Contexto').first().json;\n\nconsole.log('=== PREPARAR RESPUESTA ===');\nconsole.log('Agent Output:', JSON.stringify(agentOutput, null, 2));\n\n// Extraer el texto de respuesta del agente\nlet outputText = '';\n\nif (typeof agentOutput === 'string') {\n    outputText = agentOutput;\n} else if (agentOutput.output) {\n    outputText = agentOutput.output;\n} else if (agentOutput.text) {\n    outputText = agentOutput.text;\n} else if (agentOutput.message) {\n    outputText = agentOutput.message;\n} else {\n    // Fallback si el formato es inesperado\n    outputText = 'Ups, tuve un problemita. \u00bfPodr\u00edas repetir tu mensaje? \ud83d\ude0a';\n    console.error('\u274c Formato de respuesta inesperado:', agentOutput);\n}\n\n// Limpiar el texto (remover saltos de l\u00ednea excesivos, etc)\noutputText = outputText.trim();\n\n// Validar que no est\u00e9 vac\u00edo\nif (!outputText || outputText.length === 0) {\n    outputText = 'Disculpa, no pude procesar eso. \u00bfPodr\u00edas reformular tu mensaje? \ud83d\ude0a';\n}\n\nconsole.log('\ud83d\udce4 Respuesta final:', outputText);\n\nreturn {\n    json: {\n        output: outputText,\n        session_id: contexto.session_id,\n        timestamp: new Date().toISOString()\n    }\n};"
+      },
+      "name": "Preparar Respuesta",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -416,
+        -48
+      ],
+      "id": "a00e394e-083c-4ed9-896a-bb9b6a59cf88"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "807602635767022",
+        "recipientPhoneNumber": "={{ $json.session_id }}",
+        "textBody": "={{ $json.output }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        -176,
+        -48
+      ],
+      "id": "10c50234-a43e-491f-a4c1-d4740b04c446",
+      "name": "Send WhatsApp",
+      "webhookId": "350d9e74-af24-4dee-8535-a558f05f505f",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "3uoWZnZrleiULdPP",
+          "name": "WhatsApp account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n// ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n// Si hay input previo (trigger -> extraer datos), lo tomamos. Si no, objeto vacio.\nlet datosExtraidos = {};\ntry {\n    datosExtraidos = $input.first().json;\n} catch(e) {}\n\nconst CONFIG = {\n  // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n  BACKEND_NGROK_URL: \"https://e63044fea749.ngrok-free.app\",\n\n  // Ngrok headers (no cambiar)\n  NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n  NGROK_HEADER_VALUE: \"true\",\n\n  // Secreto Webhook\n  N8N_WEBHOOK_SECRET: \"TuSecretoSuperSeguro123\",\n\n  // Contacto de la clínica\n  TELEFONO_CLINICA: \"(601) 123-4567\"\n};\n\n// Limpiar URL por espacios extra\nif (CONFIG.BACKEND_NGROK_URL) CONFIG.BACKEND_NGROK_URL = CONFIG.BACKEND_NGROK_URL.trim();\n\nconsole.log('=== CONFIG CARGADA ===');\nconsole.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n// Pasar CONFIG + datos anteriores\nreturn {\n  json: {\n    ...CONFIG,\n    ...datosExtraidos\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1240,
+        -48
+      ],
+      "id": "config-qu3150ena",
+      "name": "CONFIG"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "CONFIGURACION",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Datos": {
+      "main": [
+        [
+          {
+            "node": "CONFIG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Conversaci\u00f3n P\u00fablica": {
+      "main": [
+        [
+          {
+            "node": "Preparar Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Contexto": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Preparar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_validar_paciente": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_clasificar_sintomas": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_consultar_citas": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_agendar_cita": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_cancelar_cita": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_confirmar_cancelacion": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_finalizar_conversacion": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CONFIG": {
+      "main": [
+        [
+          {
+            "node": "Consultar Conversaci\u00f3n P\u00fablica",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b4c8e975-1455-438f-998c-2727fbd4778b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c20a2a569ad843e6915df7024e70140d47846ec60aff4c259b44c37757f951ed"
+  },
+  "id": "JYa28MllpZFIZzc2",
+  "tags": []
+}

@@ -1,0 +1,726 @@
+{
+  "name": "01-WORKFLOW-PRINCIPAL-COMPLETO-FIXED-V2",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "messages"
+        ],
+        "options": {}
+      },
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1888,
+        -48
+      ],
+      "id": "e4e12bfe-ee6d-49f6-99e2-59803f3f8370",
+      "name": "WhatsApp Trigger",
+      "webhookId": "tu-webhook-id",
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "id": "4eTRV2nzHw6C5COc",
+          "name": "WhatsApp OAuth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== EXTRAER DATOS DEL MENSAJE DE WHATSAPP =====\nconst data = $json;\nconst sessionId = data?.messages?.[0]?.from || \"unknown\";\nconst messageText = (data?.messages?.[0]?.text?.body || \"\").trim();\nconst contactName = data?.contacts?.[0]?.profile?.name || \"Usuario\";\nconst messageType = data?.messages?.[0]?.type || \"text\";\n\nif (sessionId === \"unknown\") {\n    throw new Error('❌ No se pudo obtener el número de teléfono del remitente');\n}\n\nconsole.log('=== MENSAJE WHATSAPP RECIBIDO ===');\nconsole.log('📱 Session ID:', sessionId);\nconsole.log('💬 Mensaje:', messageText);\nconsole.log('👤 Contacto:', contactName);\nconsole.log('📝 Tipo:', messageType);\n\nreturn {\n    json: {\n        session_id: sessionId,\n        message_text: messageText,\n        contact_name: contactName,\n        message_type: messageType,\n        timestamp: new Date().toISOString()\n    }\n};"
+      },
+      "name": "Extraer Datos",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -1648,
+        -48
+      ],
+      "id": "412300bf-ed3d-4119-a565-6ccc62da2c3b"
+    },
+    {
+      "parameters": {
+        "url": "=={{ $('CONFIG').item.json.BACKEND_NGROK_URL }}/api/v1/conversaciones/activa-publica/{{ $json.session_id }}/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            },
+            {
+              "name": "=={{ $('CONFIG').item.json.NGROK_HEADER_NAME }}",
+              "value": "=={{ $('CONFIG').item.json.NGROK_HEADER_VALUE }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('CONFIG').first().json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1136,
+        -32
+      ],
+      "id": "b0e9ff76-326d-4a56-905d-ece2d0fd2526",
+      "name": "Consultar Conversación Pública",
+      "alwaysOutputData": true,
+      "continueOnFail": true,
+      "notes": "SIN JWT - Endpoint público"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== PREPARAR CONTEXTO UNIFICADO PARA EL AI AGENT (MEJORADO) =====\n\nconst datosWhatsApp = $('Extraer Datos').first().json;\nconst respuestaConversacion = $json;\n\nconsole.log('=== PREPARAR CONTEXTO ===');\nconsole.log('Datos WhatsApp:', JSON.stringify(datosWhatsApp, null, 2));\nconsole.log('Respuesta Conversación:', JSON.stringify(respuestaConversacion, null, 2));\n\n// Inicializar contexto base\nlet contexto = {\n    // Datos del mensaje actual\n    session_id: datosWhatsApp.session_id,\n    message_text: datosWhatsApp.message_text,\n    contact_name: datosWhatsApp.contact_name,\n    message_type: datosWhatsApp.message_type,\n    timestamp: datosWhatsApp.timestamp,\n    \n    // Credenciales (inicialmente vacías)\n    token: null,\n    paciente_id: null,\n    paciente_nombre: null,\n    entidad_medica_id: null,\n    conversacion_id: null,\n    \n    // Flags de estado\n    tiene_token: false,\n    es_usuario_nuevo: true,\n    conversacion_activa: false\n};\n\n// Si la respuesta tiene error (404 o cualquier otro), es normal - usuario nuevo\nif (respuestaConversacion.error) {\n    const errorMsg = respuestaConversacion.error?.message || JSON.stringify(respuestaConversacion.error);\n    \n    if (errorMsg.includes('404') || errorMsg.includes('No se encontró')) {\n        console.log('ℹ️ No hay conversación activa (normal para usuarios nuevos)');\n    } else {\n        console.log('⚠️ Error consultando conversación:', errorMsg);\n    }\n    \n    return { json: contexto };\n}\n\n// Si hay conversación activa, extraer datos y validar antes de convertir\nif (respuestaConversacion.id && respuestaConversacion.token) {\n    contexto.token = respuestaConversacion.token;\n    \n    // ✅ VALIDAR ANTES DE CONVERTIR A NUMBER (evita NaN y 0 inválidos)\n    contexto.paciente_id = respuestaConversacion.paciente_id && \n                           respuestaConversacion.paciente_id !== '0' && \n                           respuestaConversacion.paciente_id !== 0 ? \n        Number(respuestaConversacion.paciente_id) : null;\n    \n    contexto.entidad_medica_id = respuestaConversacion.entidad_medica_id && \n                                 respuestaConversacion.entidad_medica_id !== '0' && \n                                 respuestaConversacion.entidad_medica_id !== 0 ? \n        Number(respuestaConversacion.entidad_medica_id) : null;\n    \n    contexto.conversacion_id = respuestaConversacion.id && \n                               respuestaConversacion.id !== '0' && \n                               respuestaConversacion.id !== 0 ? \n        Number(respuestaConversacion.id) : null;\n    \n    contexto.paciente_nombre = respuestaConversacion.paciente_nombre || datosWhatsApp.contact_name;\n    contexto.tiene_token = true;\n    contexto.es_usuario_nuevo = false;\n    contexto.conversacion_activa = true;\n    contexto.conversacion_estado = respuestaConversacion.estado;\n    contexto.conversacion_contexto = respuestaConversacion.contexto || {};\n    \n    console.log('✅ Conversación activa encontrada');\n    console.log('🔑 Token:', contexto.token?.substring(0, 20) + '...');\n    console.log('👤 Paciente ID:', contexto.paciente_id, '(tipo:', typeof contexto.paciente_id, ')');\n    console.log('🏥 Entidad Médica ID:', contexto.entidad_medica_id, '(tipo:', typeof contexto.entidad_medica_id, ')');\n    console.log('💬 Conversación ID:', contexto.conversacion_id);\n}\n\nconsole.log('=== CONTEXTO FINAL ===');\nconsole.log(JSON.stringify(contexto, null, 2));\n\nreturn { json: contexto };"
+      },
+      "name": "Preparar Contexto",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -896,
+        -32
+      ],
+      "id": "21604e43-ad77-4542-845b-77e679c412ea",
+      "notes": "Unifica datos de WhatsApp + Conversación con validación mejorada"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Eres Sophia, asistente médica de WhatsApp. Tu trabajo es ayudar a pacientes a agendar citas médicas.\n\n## 📋 CONTEXTO ACTUAL\n- Session ID: {{ $json.session_id }}\n- Paciente ID: {{ $json.paciente_id || 'NO DISPONIBLE' }}\n- Entidad Médica ID: {{ $json.entidad_medica_id || 'NO DISPONIBLE' }}\n- Token: {{ $json.tiene_token ? 'DISPONIBLE' : 'NO DISPONIBLE' }}\n- Usuario Nuevo: {{ $json.es_usuario_nuevo ? 'SÍ' : 'NO' }}\n- Conversación Activa: {{ $json.conversacion_activa ? 'SÍ' : 'NO' }}\n- Nombre: {{ $json.paciente_nombre || $json.contact_name }}\n- Mensaje: \"={{ $json.message_text }}\"\n\n---\n\n## 🔐 REGLA #0: DETECCIÓN INTELIGENTE DE ESTADO (CRÍTICO PARA ESCALABILIDAD)\n\n**ANTES DE TOMAR CUALQUIER DECISIÓN, EVALÚA EL ESTADO DEL USUARIO:**\n\n### 🟢 USUARIO YA REGISTRADO (Conversación Activa = SÍ, Paciente ID ≠ NO DISPONIBLE)\n```\nSI conversacion_activa === SÍ Y paciente_id !== NO DISPONIBLE:\n  → El usuario YA está validado y registrado\n  → NUNCA ejecutes tool_validar_paciente\n  → Procede directamente según su solicitud:\n    - Si describe síntomas → tool_clasificar_sintomas\n    - Si pide especialidad → tool_consultar_citas\n    - Si elige horario → tool_agendar_cita\n    - Si quiere cancelar → tool_cancelar_cita\n```\n\n### 🟡 USUARIO NUEVO (Conversación Activa = NO, Paciente ID = NO DISPONIBLE)\n```\nSI conversacion_activa === NO Y paciente_id === NO DISPONIBLE:\n  → Es la primera vez que el usuario interactúa\n  → Analiza el mensaje:\n    - Si parece un número de documento (8-15 dígitos) → tool_validar_paciente\n    - Si NO es un documento → Saluda y pide su cédula\n```\n\n**EJEMPLO DE FLUJO CORRECTO:**\n```\nMensaje 1: \"1234567890\"\n→ conversacion_activa = NO, paciente_id = NO DISPONIBLE\n→ Es número → Ejecutas tool_validar_paciente\n→ Resultado: paciente_id = 42, conversacion_activa = SÍ\n\nMensaje 2: \"Tengo dolor de cabeza\"\n→ conversacion_activa = SÍ, paciente_id = 42\n→ Usuario YA registrado → NUNCA ejecutes tool_validar_paciente\n→ Ejecutas tool_clasificar_sintomas directamente\n```\n\n---\n\n## ⚠️ VALIDACIÓN DE CONTEXTO (CRÍTICO)\n\nANTES de ejecutar cualquier tool, DEBES verificar que los parámetros requeridos estén disponibles:\n\n### tool_validar_paciente\n- ✅ Ejecutar SOLO SI: `conversacion_activa === NO` Y `paciente_id === NO DISPONIBLE` Y el mensaje parece un documento\n- ❌ NUNCA ejecutar SI: `conversacion_activa === SÍ` O `paciente_id !== NO DISPONIBLE`\n- ⚠️ SI el usuario YA está registrado pero envía un número, NO lo valides, interpreta su mensaje en contexto\n\n### tool_clasificar_sintomas\n- ✅ Ejecutar SI: `paciente_id !== null` (usuario ya registrado)\n- ❌ NO ejecutar SI: `paciente_id === null` (usuario nuevo)\n- Si falta paciente_id, responde: \"Antes de clasificar tus síntomas, necesito que me proporciones tu número de cédula para identificarte 😊\"\n\n### tool_consultar_citas\n- ✅ Ejecutar SI: `entidad_medica_id !== null` Y (`categoria` definida O usuario pidió especialidad directa)\n- ❌ NO ejecutar SI: `entidad_medica_id === null`\n- Si falta entidad_medica_id, responde: \"Para consultar citas disponibles, primero necesito que completes tu registro 😊\"\n\n### tool_agendar_cita\n- ✅ Ejecutar SI: `paciente_id !== null` Y `token !== null` Y `agenda_id` es válido (>0)\n- ❌ NO ejecutar SI falta alguno de estos parámetros\n- Si falta token/paciente_id, responde: \"Para agendar una cita, necesito que estés registrado. ¿Podrías proporcionarme tu número de cédula? 😊\"\n\n### tool_cancelar_cita\n- ✅ Ejecutar SI: `paciente_id !== null` Y `token !== null`\n- ❌ NO ejecutar SI falta alguno\n\n### tool_confirmar_cancelacion\n- ✅ Ejecutar SI: `paciente_id !== null` Y `token !== null` Y `cita_id` es válido\n- ❌ NO ejecutar SI falta alguno\n\n---\n\n## 🚨 REGLA CRÍTICA #1: ENTENDER slot_id vs agenda_id\n\n**ESTRUCTURA DE UNA CITA RETORNADA POR tool_consultar_citas:**\n```json\n{\n  \"slot_id\": 2934,                    // ← ESTE ES EL ID REAL QUE DEBES USAR\n  \"agenda_id\": 199,                   // ← IGNORA ESTO COMPLETAMENTE\n  \"fecha_formateada\": \"4 de noviembre\",\n  \"hora\": \"08:00 AM\",\n  \"medico_nombre\": \"Dr. Carlos García López\"\n}\n```\n\n**NUNCA USES:**\n- ❌ El campo `agenda_id` de la respuesta\n- ❌ El número de posición (1, 2, 3, 4...)\n- ❌ Números inventados\n\n**SIEMPRE USA:**\n- ✅ El campo `slot_id` de cada cita\n\n---\n\n## 🎯 FLUJO DETALLADO PASO A PASO\n\n### PASO 0: Validación de Usuario Nuevo\n\n**Si `es_usuario_nuevo === true` Y el mensaje NO es un número de cédula:**\n```\n¡Hola! 👋 Soy Sophia, tu asistente médica.\n\nPara ayudarte a agendar una cita, necesito que me proporciones tu número de cédula 🆔\n```\n\n**Si el usuario proporciona un número (parece cédula):**\n```\n→ [Ejecutas INMEDIATAMENTE tool_validar_paciente]\n→ [Esperas resultado]\n→ Si es exitoso, continúas con el flujo normal\n→ Si falla, informas al usuario del error\n```\n\n---\n\n### PASO 1: Usuario describe síntomas o pide especialidad\n\n**VALIDACIÓN PREVIA:** Verifica que `paciente_id !== null` antes de continuar.\n\n**Si menciona especialidad directa (BYPASS):**\n```\nUsuario: \"quiero medicina general\"\n→ [Verificas: entidad_medica_id !== null]\n→ [Ejecutas INMEDIATAMENTE tool_consultar_citas con categoria: \"general\"]\n→ NO ejecutes tool_clasificar_sintomas\n```\n\n**Si describe síntomas:**\n```\nUsuario: \"me duele la cabeza\"\n→ [Verificas: paciente_id !== null]\n→ [Ejecutas tool_clasificar_sintomas]\n→ [Esperas resultado]\n→ [Ejecutas tool_consultar_citas con la categoría recibida]\n```\n\n---\n\n### PASO 2: GUARDAR MAPEO (MUY IMPORTANTE)\n\nCuando `tool_consultar_citas` retorne algo como esto:\n\n```json\n{\n  \"citas\": [\n    {\"slot_id\": 2950, \"fecha_formateada\": \"18 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2951, \"fecha_formateada\": \"19 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2966, \"fecha_formateada\": \"6 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2982, \"fecha_formateada\": \"10 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2998, \"fecha_formateada\": \"27 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2983, \"fecha_formateada\": \"11 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2934, \"fecha_formateada\": \"4 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2949, \"fecha_formateada\": \"17 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2918, \"fecha_formateada\": \"31 de octubre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"},\n    {\"slot_id\": 2997, \"fecha_formateada\": \"13 de noviembre\", \"hora\": \"08:00 AM\", \"medico_nombre\": \"Dr. Carlos García López\"}\n  ],\n  \"total_citas\": 351\n}\n```\n\n**DEBES MEMORIZAR ESTE MAPEO EN TU CONTEXTO CONVERSACIONAL:**\n\n```\nCITAS_MOSTRADAS = {\n  \"1\": {\"slot_id\": 2950, \"fecha\": \"18 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"2\": {\"slot_id\": 2951, \"fecha\": \"19 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"3\": {\"slot_id\": 2966, \"fecha\": \"6 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"4\": {\"slot_id\": 2982, \"fecha\": \"10 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"5\": {\"slot_id\": 2998, \"fecha\": \"27 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"6\": {\"slot_id\": 2983, \"fecha\": \"11 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"7\": {\"slot_id\": 2934, \"fecha\": \"4 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"8\": {\"slot_id\": 2949, \"fecha\": \"17 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"9\": {\"slot_id\": 2918, \"fecha\": \"31 de octubre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"},\n  \"10\": {\"slot_id\": 2997, \"fecha\": \"13 de noviembre\", \"hora\": \"08:00 AM\", \"medico\": \"Dr. Carlos García López\"}\n}\n```\n\n---\n\n### PASO 3: MOSTRAR CITAS AL USUARIO\n\n```\nHe clasificado tus síntomas como Medicina General 🏥\n\nEncontré 351 citas disponibles. Te muestro las primeras 10:\n\n📅 1. Lunes 18 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 2. Martes 19 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 3. Miércoles 6 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 4. Lunes 10 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 5. Miércoles 27 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 6. Martes 11 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 7. Martes 4 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 8. Lunes 17 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 9. Viernes 31 de octubre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n📅 10. Jueves 13 de noviembre a las 08:00 AM\n   👨‍⚕️ Dr. Carlos García López\n\n¿Cuál te gustaría? Dime el número (ej: \"la 1\" o \"quiero la primera\") 😊\n```\n\n---\n\n### PASO 4: USUARIO ELIGE UNA CITA\n\n**VALIDACIÓN PREVIA:** Verifica que `paciente_id !== null` Y `token !== null` antes de ejecutar tool_agendar_cita.\n\n**EJEMPLO 1: Usuario dice \"quiero la del martes 4 de noviembre\"**\n\n```\n[PROCESO MENTAL:]\n1. Usuario mencionó: \"4 de noviembre\"\n2. Busco en mi CITAS_MOSTRADAS cuál tiene fecha \"4 de noviembre\"\n3. Encuentro: Posición 7 → slot_id: 2934\n4. Verifico: paciente_id !== null Y token !== null\n5. USO el slot_id: 2934\n\n[EJECUTO tool_agendar_cita:]\n{\n  \"agenda_id\": 2934,  // ← slot_id de la posición 7\n  \"motivo_consulta\": \"Consulta por dolor de cabeza\"\n}\n```\n\n**EJEMPLO 2: Usuario dice \"la primera\"**\n\n```\n[PROCESO MENTAL:]\n1. Usuario mencionó: \"la primera\" → Posición 1\n2. Busco en mi CITAS_MOSTRADAS la posición 1\n3. Encuentro: Posición 1 → slot_id: 2950\n4. Verifico: paciente_id !== null Y token !== null\n5. USO el slot_id: 2950\n\n[EJECUTO tool_agendar_cita:]\n{\n  \"agenda_id\": 2950,  // ← slot_id de la posición 1\n  \"motivo_consulta\": \"Consulta por dolor de cabeza\"\n}\n```\n\n**EJEMPLO 3: Usuario dice \"la 7\"**\n\n```\n[PROCESO MENTAL:]\n1. Usuario mencionó: \"la 7\" → Posición 7\n2. Busco en mi CITAS_MOSTRADAS la posición 7\n3. Encuentro: Posición 7 → slot_id: 2934\n4. Verifico: paciente_id !== null Y token !== null\n5. USO el slot_id: 2934\n\n[EJECUTO tool_agendar_cita:]\n{\n  \"agenda_id\": 2934,  // ← slot_id de la posición 7\n  \"motivo_consulta\": \"Consulta por dolor de cabeza\"\n}\n```\n\n**EJEMPLO 4: Usuario dice \"con el Dr. García del 4 de noviembre\"**\n\n```\n[PROCESO MENTAL:]\n1. Usuario mencionó: \"4 de noviembre\"\n2. Busco en mi CITAS_MOSTRADAS cuál tiene fecha \"4 de noviembre\"\n3. Encuentro: Posición 7 → slot_id: 2934\n4. Verifico: paciente_id !== null Y token !== null\n5. USO el slot_id: 2934\n\n[EJECUTO tool_agendar_cita:]\n{\n  \"agenda_id\": 2934,  // ← slot_id de la posición 7\n  \"motivo_consulta\": \"Consulta por dolor de cabeza\"\n}\n```\n\n---\n\n### PASO 5: PROCESAR RESULTADO\n\n**Si success = true:**\n```\n¡Perfecto! Tu cita está confirmada:\n📅 Martes 4 de noviembre a las 08:00 AM\n👨‍⚕️ Dr. Carlos García López\n\nTe llegará un recordatorio antes de tu cita 😊\n```\n\n**Si success = false (slot ocupado):**\n```\nLo siento, ese horario acaba de ser ocupado 😔\n¿Quieres que te muestre los horarios disponibles actualizados?\n```\n\n---\n\n## ⚙️ HERRAMIENTAS DISPONIBLES\n\n### `tool_validar_paciente`\n**Cuándo:** Usuario nuevo envía cédula\n**Validación:** Ninguna (siempre disponible)\n**Ejecutar:** INMEDIATAMENTE, sin anunciar\n\n### `tool_clasificar_sintomas`\n**Cuándo:** Usuario describe síntomas SIN mencionar especialidad\n**Validación:** Requiere `paciente_id !== null`\n**Parámetros:**\n```json\n{\n  \"sintomas\": \"[texto del usuario]\",\n  \"paciente_id\": [del contexto - OPCIONAL si no está disponible]\n}\n```\n**Ejecutar:** INMEDIATAMENTE si pasa validación, sin anunciar\n\n### `tool_consultar_citas`\n**Cuándo:** Después de clasificar O si usuario pide especialidad directa (BYPASS)\n**Validación:** Requiere `entidad_medica_id !== null`\n**Parámetros:**\n```json\n{\n  \"categoria\": \"general|odontologia|citologia\",\n  \"entidad_medica_id\": [del contexto],\n  \"page\": 1\n}\n```\n**CRÍTICO:** Después de ejecutar, GUARDA el mapeo posición → slot_id\n**Ejecutar:** INMEDIATAMENTE si pasa validación, sin anunciar\n\n### `tool_agendar_cita`\n**Cuándo:** Usuario elige una cita\n**Validación:** Requiere `paciente_id !== null` Y `token !== null`\n**Parámetros:**\n```json\n{\n  \"agenda_id\": [el slot_id de la cita elegida - NO el número de posición],\n  \"motivo_consulta\": \"[descripción breve]\"\n}\n```\n**CRÍTICO:** \n- El parámetro se llama \"agenda_id\" pero el VALOR debe ser el \"slot_id\"\n- NUNCA uses el número de posición (1-10) directamente\n- SIEMPRE busca el slot_id correspondiente en tu CITAS_MOSTRADAS\n- NUNCA uses 0 o valores por defecto\n**Ejecutar:** INMEDIATAMENTE si pasa validación, sin anunciar\n\n### `tool_cancelar_cita`\n**Cuándo:** Usuario quiere cancelar\n**Validación:** Requiere `paciente_id !== null` Y `token !== null`\n**Ejecutar:** INMEDIATAMENTE si pasa validación, sin anunciar\n\n### `tool_confirmar_cancelacion`\n**Cuándo:** Usuario confirma cancelación\n**Validación:** Requiere `paciente_id !== null` Y `token !== null`\n**Parámetros:**\n```json\n{\n  \"cita_id\": [id de la cita a cancelar]\n}\n```\n**Ejecutar:** INMEDIATAMENTE si pasa validación, sin anunciar\n\n---\n\n## 🔴 ERRORES FATALES A EVITAR\n\n### ERROR 1: Ejecutar tools sin validar contexto\n```\n❌ MAL: Ejecutar tool_clasificar_sintomas cuando paciente_id === null\nResultado: Error de schema\n```\n\n```\n✅ BIEN: Verificar paciente_id !== null antes de ejecutar\nSi falta: Pedir cédula al usuario primero\n```\n\n### ERROR 2: Usar número de posición como agenda_id\n```json\n// ❌ INCORRECTO\n// Usuario dijo \"la 7\"\n{\"agenda_id\": 7}  // ESTO ESTÁ MAL\n```\n\n```json\n// ✅ CORRECTO\n// Usuario dijo \"la 7\"\n// Buscaste: Posición 7 → slot_id: 2934\n{\"agenda_id\": 2934}  // ESTO ES CORRECTO\n```\n\n### ERROR 3: No guardar el mapeo después de tool_consultar_citas\n```\n❌ MAL: No guardaste el mapeo\nUsuario: \"la del 4 de noviembre\"\nTú: *no sabes qué slot_id corresponde*\n```\n\n```\n✅ BIEN: Guardaste el mapeo\nUsuario: \"la del 4 de noviembre\"\nTú: *buscas en CITAS_MOSTRADAS → Posición 7 → slot_id: 2934*\n```\n\n### ERROR 4: Confundir slot_id con agenda_id\n```\n❌ MAL: Usar el campo agenda_id de la respuesta\nRespuesta tiene: {\"slot_id\": 2934, \"agenda_id\": 199}\nUsas: agenda_id: 199  // INCORRECTO\n```\n\n```\n✅ BIEN: Usar SIEMPRE el slot_id\nRespuesta tiene: {\"slot_id\": 2934, \"agenda_id\": 199}\nUsas: agenda_id: 2934  // CORRECTO (sí, el parámetro se llama agenda_id pero usas el valor de slot_id)\n```\n\n---\n\n## 🎭 PERSONALIDAD\n\n- Empática pero eficiente\n- Usa emojis con moderación 😊\n- No anuncies las ejecuciones de tools\n- Si hay error, ofrece alternativas\n- Si falta contexto, guía al usuario amablemente\n\n---\n\n## 📝 CHECKLIST MENTAL ANTES DE EJECUTAR CUALQUIER TOOL\n\n### Antes de ejecutar `tool_clasificar_sintomas`:\n1. ✅ ¿El usuario está registrado? (paciente_id !== null)\n2. ✅ Si NO → Pedir cédula primero\n3. ✅ Si SÍ → Proceder a clasificar\n\n### Antes de ejecutar `tool_consultar_citas`:\n1. ✅ ¿Tengo entidad_medica_id disponible?\n2. ✅ ¿Tengo la categoría definida?\n3. ✅ Si ambos SÍ → Proceder a consultar\n\n### Antes de ejecutar `tool_agendar_cita`:\n1. ✅ ¿Guardé el mapeo cuando ejecuté tool_consultar_citas?\n2. ✅ ¿Sé qué slot_id corresponde a la opción elegida por el usuario?\n3. ✅ ¿Estoy usando el slot_id (no el número de posición)?\n4. ✅ ¿El slot_id es un número grande (>1000 típicamente)?\n5. ✅ ¿Tengo paciente_id Y token disponibles?\n6. ✅ Si todas son ✅, procede a ejecutar.\n\n---\n\n## 📚 REGLA DE ELECCIÓN RESTRINGIDA A LAS 10 MOSTRADAS Y PAGINACIÓN\n\nInterpretación permitida de la elección del paciente:\n- Ordinal: \"la 3\", \"la primera\", \"#7\" → usa `mapa_posiciones`/`lista_candidatos` del resultado de `tool_consultar_citas` y resuelve al `slot_id` correspondiente.\n- Fecha/hora: \"13 de noviembre a las 08:00\" → busca coincidencia exacta en `lista_candidatos` y toma su `slot_id`.\n- Nombre del médico: \"con el Dr. Carlos García López del 13 de noviembre\" → valida fecha + médico dentro de `lista_candidatos`.\n\nRestricción:\n- Si la elección NO corresponde a alguna de las 10 opciones actuales, responde: \"Esa opción no está en las 10 mostradas. ¿Quieres ver más opciones?\" y, si acepta, ejecuta `tool_consultar_citas` con `page = page + 1` para traer las siguientes 10.\n\n**RECUERDA: El éxito de agendar depende 100% de:**\n1. Validar que el usuario esté registrado (paciente_id !== null)\n2. Validar que tenga token disponible\n3. Usar el slot_id correcto\n4. Nunca usar números de posición ni el campo agenda_id de la respuesta",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -656,
+        -32
+      ],
+      "id": "89f20ecf-dfe4-4a8d-919a-fa7b58868086",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {
+          "maxTokens": 1500,
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -784,
+        256
+      ],
+      "id": "01f76f33-4f27-48f9-bbce-9f97ae0dc4ee",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "BYAMJ9yZa71IxL39",
+          "name": "OpenAi account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "USE THIS ONLY when conversacion_activa is NO and paciente_id is NO DISPONIBLE and message looks like a document number (8-15 digits). Automatically passes message_text as query and session_id from context. EXECUTE silently.",
+        "workflowId": {
+          "__rl": true,
+          "value": "1B0BC7UVqfah4n2a",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/1B0BC7UVqfah4n2a",
+          "cachedResultName": "02-SUB-VALIDAR-PACIENTE-V2-OPTIMIZED"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "query": "={{ $fromAI('query', $('Preparar Contexto').item.json.message_text, 'string') }}",
+            "session_id": "={{ $('Preparar Contexto').item.json.session_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "query",
+              "displayName": "query",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "9ff73e0d-fb5e-4bb8-8407-d10260c90af5",
+      "name": "tool_validar_paciente",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -432,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user describes symptoms WITHOUT mentioning a specialty. Provide: sintomas (user text), paciente_id (from context - OPTIONAL if not available). Returns category. EXECUTE silently, don't announce. IMPORTANT: Only execute if paciente_id is not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "JNUdDHCXbIWVhtAQ",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/JNUdDHCXbIWVhtAQ",
+          "cachedResultName": "04-SUB-CLASIFICAR-SINTOMAS-V3-FIXED"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sintomas": "={{ $fromAI('sintomas', '', 'string') }}",
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id }}"
+          },
+          "schema": [
+            {
+              "id": "sintomas",
+              "displayName": "sintomas",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "id": "paciente_id",
+              "displayName": "paciente_id",
+              "required": false,
+              "type": "number"
+            }
+          ]
+        }
+      },
+      "id": "f677df95-c6be-4de0-8094-677be2eb8203",
+      "name": "tool_clasificar_sintomas",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        -208,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY after classification OR when user requests specific specialty (bypass). Provide: categoria (string), entidad_medica_id (from context), page (optional, default 1). Returns appointments with slot_id. EXECUTE silently. IMPORTANT: Only execute if entidad_medica_id is not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "TZ2nd8sSxArKFSll",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/TZ2nd8sSxArKFSll",
+          "cachedResultName": "05-SUB-CONSULTAR-CITAS-CORREGIDO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "categoria": "={{ $fromAI('categoria', '', 'string') }}",
+            "entidad_medica_id": "={{ $('Preparar Contexto').item.json.entidad_medica_id }}",
+            "token": "={{ $('Preparar Contexto').item.json.token }}",
+            "page": "={{ $fromAI('page', 1, 'number') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "categoria",
+              "displayName": "categoria",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "entidad_medica_id",
+              "displayName": "entidad_medica_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "page",
+              "displayName": "page",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "33a22aa4-5480-49f2-9c28-159b637b2912",
+      "name": "tool_consultar_citas",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        16,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user selects appointment. Provide: agenda_id (USE slot_id from selected appointment - NEVER use position number or 0), motivo_consulta (string). Context provides: paciente_id, session_id, token. EXECUTE silently. IMPORTANT: Only execute if paciente_id and token are not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "N4zzLZIzuIVMtalT",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/N4zzLZIzuIVMtalT",
+          "cachedResultName": "06-SUB-AGENDAR-CITA-MEJORADO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "agenda_id": "={{ $fromAI('agenda_id', '', 'number') }}",
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id }}",
+            "motivo_consulta": "={{ $fromAI('motivo_consulta', 'Consulta programada', 'string') }}",
+            "sintomas_json": "={}",
+            "session_id": "={{ $('Preparar Contexto').item.json.session_id }}",
+            "token": "={{ $('Preparar Contexto').item.json.token }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "agenda_id",
+              "displayName": "agenda_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "paciente_id",
+              "displayName": "paciente_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "motivo_consulta",
+              "displayName": "motivo_consulta",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "sintomas_json",
+              "displayName": "sintomas_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "id": "5a4bd1ea-dc2a-468e-97f4-150d44580102",
+      "name": "tool_agendar_cita",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        208,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user wants to cancel. Context provides: paciente_id, token. Returns active appointments list. EXECUTE silently. IMPORTANT: Only execute if paciente_id and token are not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "0ceZZYqfQcExFkTo",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/0ceZZYqfQcExFkTo",
+          "cachedResultName": "07-SUB-LISTAR-CITAS-ACTIVAS-CORREGIDO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id }}",
+            "token": "={{ $('Preparar Contexto').item.json.token }}"
+          },
+          "schema": [
+            {
+              "id": "paciente_id",
+              "displayName": "paciente_id",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "38eda49c-d217-4f3d-8dd9-f13af68aed5e",
+      "name": "tool_cancelar_cita",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "description": "USE THIS IMMEDIATELY when user confirms cancellation. Provide: cita_id (from list). Context provides: paciente_id, token. EXECUTE silently. IMPORTANT: Only execute if paciente_id and token are not null.",
+        "workflowId": {
+          "__rl": true,
+          "value": "sDg9x1DV5iXht1L5",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/sDg9x1DV5iXht1L5",
+          "cachedResultName": "08-SUB-CONFIRMAR-CANCELACION-CORREGIDO"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cita_id": "={{ $fromAI('cita_id', '', 'number') }}",
+            "paciente_id": "={{ $('Preparar Contexto').item.json.paciente_id }}",
+            "token": "={{ $('Preparar Contexto').item.json.token }}"
+          },
+          "schema": [
+            {
+              "id": "cita_id",
+              "displayName": "cita_id",
+              "required": true,
+              "type": "number"
+            },
+            {
+              "id": "paciente_id",
+              "displayName": "paciente_id",
+              "required": false,
+              "type": "number"
+            },
+            {
+              "id": "token",
+              "displayName": "token",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "71dd12d4-9ae5-41c7-acc3-8b98f1c8bbbd",
+      "name": "tool_confirmar_cancelacion",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// ===== PREPARAR RESPUESTA FINAL PARA WHATSAPP =====\n\nconst agentOutput = $json;\nconst contexto = $('Preparar Contexto').first().json;\n\nconsole.log('=== PREPARAR RESPUESTA ===');\nconsole.log('Agent Output:', JSON.stringify(agentOutput, null, 2));\n\n// Extraer el texto de respuesta del agente\nlet outputText = '';\n\nif (typeof agentOutput === 'string') {\n    outputText = agentOutput;\n} else if (agentOutput.output) {\n    outputText = agentOutput.output;\n} else if (agentOutput.text) {\n    outputText = agentOutput.text;\n} else if (agentOutput.message) {\n    outputText = agentOutput.message;\n} else {\n    // Fallback si el formato es inesperado\n    outputText = 'Ups, tuve un problemita. ¿Podrías repetir tu mensaje? 😊';\n    console.error('❌ Formato de respuesta inesperado:', agentOutput);\n}\n\n// Limpiar el texto (remover saltos de línea excesivos, etc)\noutputText = outputText.trim();\n\n// Validar que no esté vacío\nif (!outputText || outputText.length === 0) {\n    outputText = 'Disculpa, no pude procesar eso. ¿Podrías reformular tu mensaje? 😊';\n}\n\nconsole.log('📤 Respuesta final:', outputText);\n\nreturn {\n    json: {\n        output: outputText,\n        session_id: contexto.session_id,\n        timestamp: new Date().toISOString()\n    }\n};"
+      },
+      "name": "Preparar Respuesta",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -352,
+        -32
+      ],
+      "id": "e55b824d-36e6-4dff-9e5b-136cb73dcaf3"
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "phoneNumberId": "873759809151718",
+        "recipientPhoneNumber": "={{ $json.session_id }}",
+        "textBody": "={{ $json.output }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1.1,
+      "position": [
+        -112,
+        -32
+      ],
+      "id": "647b9172-633e-48fb-8f09-5f871208ed7a",
+      "name": "Send WhatsApp",
+      "webhookId": "350d9e74-af24-4dee-8535-a558f05f505f",
+      "credentials": {
+        "whatsAppApi": {
+          "id": "94tKDNJtKoxUGPTH",
+          "name": "WhatsApp account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.session_id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryRedisChat",
+      "typeVersion": 1.5,
+      "position": [
+        -608,
+        288
+      ],
+      "id": "c8c1a537-d2a7-4d54-9c97-56cb5dadf95c",
+      "name": "Redis Chat Memory",
+      "credentials": {
+        "redis": {
+          "id": "kOI8a9sT8AozFYEo",
+          "name": "Redis account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIGURACIÓN CENTRALIZADA =====\n  // ⚠️ EDITAR AQUÍ cuando cambien URLs o valores\n\n  const CONFIG = {\n    // Backend - ⚠️ CAMBIAR ESTA URL cada vez que reinicies ngrok\n    BACKEND_NGROK_URL: \"https://e5d3dba10ea2.ngrok-free.app\",\n\n    // Ngrok headers (no cambiar)\n    NGROK_HEADER_NAME: \"ngrok-skip-browser-warning\",\n    NGROK_HEADER_VALUE: \"true\",\n\n    // Contacto de la clínica\n    TELEFONO_CLINICA: \"+573001234567\"\n  };\n\n  console.log('=== CONFIG CARGADA ===');\n  console.log('BACKEND_NGROK_URL:', CONFIG.BACKEND_NGROK_URL);\n\n  // Pasar CONFIG + datos del trigger anterior\n  return {\n    json: {\n      ...CONFIG,\n      ...$json  // Preserva datos de Extraer Datos\n    }\n  };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        -48
+      ],
+      "id": "f4712fe5-d282-4d3e-a644-67d71f287772",
+      "name": "config"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extraer Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Datos": {
+      "main": [
+        [
+          {
+            "node": "config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Conversación Pública": {
+      "main": [
+        [
+          {
+            "node": "Preparar Contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Contexto": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Preparar Respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Respuesta": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_validar_paciente": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_clasificar_sintomas": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_consultar_citas": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_agendar_cita": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_cancelar_cita": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tool_confirmar_cancelacion": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "config": {
+      "main": [
+        [
+          {
+            "node": "Consultar Conversación Pública",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1077bfb1-c9b5-49b8-b0d0-bd024789f936",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "11201dd6a30282e05f7379a1403b5b6ea5dc3878308c3a20144a818fa23f5329"
+  },
+  "id": "XYqdOUer8wKsRAys",
+  "tags": []
+}
